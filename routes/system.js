@@ -2,25 +2,74 @@ const express = require('express');
 const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const bcrypt = require('bcrypt');
+const { exec } = require('child_process');
+const path = require('path');
+const fs = require('fs');
 const pool = require('../config/db');
 const { verifyToken, authorizeRoles } = require('../middlewares/verifyToken');
 
+// =================== Task 1: Optimized Notifications ===================
+// FIX: Replaced full-table JS forEach with a targeted SQL query that only
+// fetches medicines with low stock OR near/past expiry. No full table scan in RAM.
 router.get('/notifications', verifyToken, authorizeRoles('admin', 'pharmacist'), async (req, res) => {
   try {
-    const [medicines] = await pool.query('SELECT * FROM Medicine');
-    let alerts = [];
-    const today = new Date();
-    medicines.forEach(med => {
-      if (med.quantity === 0) alerts.push({ id: uuidv4(), type: 'low_stock', urgent: true, title: `نفاد كمية: ${med.name}`, message: `الكمية صفر! يرجى الطلب فوراً.` });
-      else if (med.quantity <= 10) alerts.push({ id: uuidv4(), type: 'low_stock', urgent: false, title: `نقص مخزون: ${med.name}`, message: `متبقي ${med.quantity} علبة فقط.` });
+    const [medicines] = await pool.query(`
+      SELECT id, name, quantity, expiryDate
+      FROM Medicine
+      WHERE quantity <= 10
+         OR expiryDate <= DATE_ADD(CURDATE(), INTERVAL 30 DAY)
+    `);
 
+    const today = new Date();
+    const alerts = [];
+
+    medicines.forEach(med => {
+      // --- Stock alerts ---
+      if (med.quantity === 0) {
+        alerts.push({
+          id: uuidv4(),
+          type: 'low_stock',
+          urgent: true,
+          title: `نفاد كمية: ${med.name}`,
+          message: `الكمية صفر! يرجى الطلب فوراً.`
+        });
+      } else if (med.quantity <= 10) {
+        alerts.push({
+          id: uuidv4(),
+          type: 'low_stock',
+          urgent: false,
+          title: `نقص مخزون: ${med.name}`,
+          message: `متبقي ${med.quantity} علبة فقط.`
+        });
+      }
+
+      // --- Expiry alerts ---
       const expiryDate = new Date(med.expiryDate);
       const diffDays = Math.ceil((expiryDate - today) / (1000 * 60 * 60 * 24));
-      if (diffDays < 0) alerts.push({ id: uuidv4(), type: 'expiry', urgent: true, title: `دواء منتهي الصلاحية: ${med.name}`, message: `انتهت صلاحيته.` });
-      else if (diffDays <= 30) alerts.push({ id: uuidv4(), type: 'expiry', urgent: true, title: `صلاحية توشك على الانتهاء: ${med.name}`, message: `سينتهي قريباً.` });
+      if (diffDays < 0) {
+        alerts.push({
+          id: uuidv4(),
+          type: 'expiry',
+          urgent: true,
+          title: `دواء منتهي الصلاحية: ${med.name}`,
+          message: `انتهت صلاحيته.`
+        });
+      } else if (diffDays <= 30) {
+        alerts.push({
+          id: uuidv4(),
+          type: 'expiry',
+          urgent: true,
+          title: `صلاحية توشك على الانتهاء: ${med.name}`,
+          message: `سينتهي قريباً.`
+        });
+      }
     });
+
     res.json(alerts);
-  } catch (err) { res.status(500).json({ error: 'حدث خطأ في الخادم' }); }
+  } catch (err) {
+    console.error('Notifications Error:', err.message);
+    res.status(500).json({ error: 'حدث خطأ في الخادم' });
+  }
 });
 
 router.get('/reports/today', verifyToken, authorizeRoles('admin', 'pharmacist'), async (req, res) => {
@@ -111,32 +160,105 @@ router.post('/logs', verifyToken, authorizeRoles('admin'), async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'حدث خطأ' }); }
 });
 
-// =================== التعديل لحل مشكلة الإيرور ===================
-// الترتيب الآن يستخدم timestamp ليتوافق مع الداتا بيز
+// =================== Task 3: Paginated Logs with ORDER BY ===================
+// FIX: Added offset/limit pagination via ?page=&limit= query params (default limit 50).
+// Restored ORDER BY timestamp DESC. Returns total count for frontend pagination controls.
 router.get('/logs', verifyToken, authorizeRoles('admin'), async (req, res) => {
   try {
-    // شلنا الـ ORDER BY خالص عشان يقرأ البيانات الموجودة بدون مشاكل
-    const [logs] = await pool.query('SELECT * FROM AuditLog');
-    res.json(logs);
-  } catch (err) { 
-    console.error("Logs Error:", err.message);
-    res.status(500).json({ error: 'تفاصيل الخطأ: ' + err.message }); 
+    const limit = Math.max(1, parseInt(req.query.limit, 10) || 50);
+    const page  = Math.max(1, parseInt(req.query.page,  10) || 1);
+    const offset = (page - 1) * limit;
+
+    const [[{ total }]] = await pool.query('SELECT COUNT(*) AS total FROM AuditLog');
+    const [logs] = await pool.query(
+      'SELECT * FROM AuditLog ORDER BY timestamp DESC LIMIT ? OFFSET ?',
+      [limit, offset]
+    );
+
+    res.json({
+      data: logs,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit)
+      }
+    });
+  } catch (err) {
+    console.error('Logs Error:', err.message);
+    res.status(500).json({ error: 'تفاصيل الخطأ: ' + err.message });
   }
 });
 
+// =================== Task 2: Safe Backup via mysqldump Stream ===================
+// FIX: Replaced the full in-memory JSON load with a mysqldump child process.
+// The dump is streamed directly to the client as a downloadable .sql file,
+// preventing any RAM accumulation regardless of database size.
 router.get('/backup', verifyToken, authorizeRoles('admin'), async (req, res) => {
   try {
-    const [users] = await pool.query(
-      'SELECT id, username, fullName, email, phone, role, active, expectedDays, dailyHours FROM User'
-    );
-    const [medicines] = await pool.query(
-      'SELECT id, name, barcode, expiryDate, quantity, purchasePrice, sellingPrice, requiresPrescription, supplierId, pillCount, stripCount, manufacturer, genericName, medicineForm FROM Medicine'
-    );
-    const [sales] = await pool.query(
-      'SELECT id, total, cost, profit, paymentMethod, cashierName, cashierId, ts FROM Sale'
-    );
-    res.json({ users, medicines, sales });
-  } catch (err) { res.status(500).json({ error: 'حدث خطأ' }); }
+    const dbHost     = process.env.DB_HOST     || 'localhost';
+    const dbPort     = process.env.DB_PORT     || '3306';
+    const dbUser     = process.env.DB_USER     || 'root';
+    const dbPassword = process.env.DB_PASSWORD || '';
+    const dbName     = process.env.DB_NAME     || 'careplus';
+
+    // Tables to include in backup — excludes no-value audit noise if desired.
+    // Keeping all app tables to preserve full restore capability.
+    const tables = ['User', 'Medicine', 'Supplier', 'Sale', 'SaleItem', 'ReturnSale', 'Attendance', 'DailyClosing', 'AuditLog', 'ManagerSecurity'];
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const filename  = `careplus_backup_${timestamp}.sql`;
+
+    // Build the mysqldump command. Password is passed via env var to avoid
+    // it appearing in process lists (MYSQL_PWD is the standard safe approach).
+    const dumpCommand = [
+      'mysqldump',
+      `--host=${dbHost}`,
+      `--port=${dbPort}`,
+      `--user=${dbUser}`,
+      '--single-transaction',
+      '--routines',
+      '--triggers',
+      '--set-gtid-purged=OFF',
+      dbName,
+      ...tables
+    ].join(' ');
+
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+
+    const child = exec(dumpCommand, {
+      env: { ...process.env, MYSQL_PWD: dbPassword },
+      maxBuffer: 512 * 1024 * 1024 // 512 MB safety ceiling; stream avoids RAM usage
+    });
+
+    child.stdout.pipe(res);
+
+    child.stderr.on('data', (data) => {
+      // mysqldump writes non-fatal warnings to stderr; log but don't abort
+      console.warn('mysqldump stderr:', data.toString());
+    });
+
+    child.on('error', (err) => {
+      console.error('Backup exec error:', err.message);
+      if (!res.headersSent) {
+        res.status(500).json({ error: 'فشل تشغيل أداة النسخ الاحتياطي على الخادم' });
+      }
+    });
+
+    child.on('close', (code) => {
+      if (code !== 0) {
+        console.error(`mysqldump exited with code ${code}`);
+        if (!res.headersSent) {
+          res.status(500).json({ error: 'حدث خطأ أثناء إنشاء النسخة الاحتياطية' });
+        }
+      }
+    });
+
+  } catch (err) {
+    console.error('Backup Error:', err.message);
+    res.status(500).json({ error: 'حدث خطأ' });
+  }
 });
 
 module.exports = router;

@@ -4,14 +4,35 @@ const { v4: uuidv4 } = require('uuid');
 const pool = require('../config/db');
 const { verifyToken, authorizeRoles } = require('../middlewares/verifyToken');
 const { validateRequest, schemas } = require('../middlewares/validator');
-const axios = require('axios'); // 🌟 إضافة مكتبة axios
+const axios = require('axios');
 
-// جلب كل الأدوية
+// =================== Task 3: Paginated Medicine List ===================
+// FIX: Added offset/limit pagination via ?page=&limit= query params (default limit 50).
+// Returns total count alongside data so the frontend can build pagination controls.
 router.get('/', verifyToken, authorizeRoles('admin', 'pharmacist'), async (req, res) => {
   try {
-    const [medicines] = await pool.query('SELECT * FROM Medicine');
-    res.json(medicines);
-  } catch (err) { res.status(500).json({ error: 'حدث خطأ' }); }
+    const limit  = Math.max(1, parseInt(req.query.limit, 10) || 50);
+    const page   = Math.max(1, parseInt(req.query.page,  10) || 1);
+    const offset = (page - 1) * limit;
+
+    const [[{ total }]] = await pool.query('SELECT COUNT(*) AS total FROM Medicine');
+    const [medicines]   = await pool.query(
+      'SELECT * FROM Medicine ORDER BY name ASC LIMIT ? OFFSET ?',
+      [limit, offset]
+    );
+
+    res.json({
+      data: medicines,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit)
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'حدث خطأ' });
+  }
 });
 
 // البحث بالباركود (عشان جهاز الباركود في شاشة البيع)
@@ -23,29 +44,29 @@ router.get('/search/:barcode', verifyToken, authorizeRoles('admin', 'pharmacist'
   } catch (err) { res.status(500).json({ error: 'حدث خطأ في البحث' }); }
 });
 
-// إضافة دواء جديد 
+// إضافة دواء جديد
 router.post('/', verifyToken, authorizeRoles('admin', 'pharmacist'), validateRequest(schemas.medicine), async (req, res) => {
   try {
-    const { 
-      name, barcode, expiryDate, quantity, purchasePrice, sellingPrice, 
-      requiresPrescription, supplierId, 
-      pillCount, stripCount, manufacturer, genericName, medicineForm 
+    const {
+      name, barcode, expiryDate, quantity, purchasePrice, sellingPrice,
+      requiresPrescription, supplierId,
+      pillCount, stripCount, manufacturer, genericName, medicineForm
     } = req.body;
 
     const sql = `INSERT INTO Medicine 
       (id, name, barcode, expiryDate, quantity, purchasePrice, sellingPrice, requiresPrescription, supplierId, pillCount, stripCount, manufacturer, genericName, medicineForm) 
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`; 
-      
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+
     await pool.query(sql, [
-      uuidv4(), name, barcode, expiryDate, quantity, purchasePrice, sellingPrice, 
+      uuidv4(), name, barcode, expiryDate, quantity, purchasePrice, sellingPrice,
       requiresPrescription || false, supplierId || null,
-      pillCount || 0, stripCount || 0, manufacturer || null, genericName || null, medicineForm || null 
+      pillCount || 0, stripCount || 0, manufacturer || null, genericName || null, medicineForm || null
     ]);
-    
+
     res.json({ message: 'تم إضافة الدواء بنجاح' });
   } catch (err) {
     if (err.code === 'ER_DUP_ENTRY') return res.status(400).json({ error: 'الباركود مسجل مسبقاً' });
-    res.status(500).json({ error: err.message }); 
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -66,23 +87,31 @@ router.delete('/:id', verifyToken, authorizeRoles('admin', 'pharmacist'), async 
     res.json({ message: 'تم مسح الدواء بنجاح' });
   } catch (err) {
     if (err.code === 'ER_ROW_IS_REFERENCED_2') return res.status(400).json({ error: 'مرتبط بفواتير مبيعات سابقة!' });
-    res.status(500).json({ error: 'حدث خطأ' }); 
+    res.status(500).json({ error: 'حدث خطأ' });
   }
 });
 
-// ==========================================
-// 🌟 راوت جلب اقتراحات المواد الفعالة (يعمل بنجاح مع rxterms)
-// ==========================================
+// =================== Task 4: Axios Timeout on Generic Suggestions ===================
+// FIX: Added a strict 5000ms timeout to the axios request.
+// Timeout errors are caught separately and return a descriptive Arabic message.
 router.get('/generic-suggestions', verifyToken, authorizeRoles('admin', 'pharmacist'), async (req, res) => {
   try {
-    const { term } = req.query; 
-    if (!term || term.length < 2) return res.json([]); 
+    const { term } = req.query;
+    if (!term || term.length < 2) return res.json([]);
 
-    const response = await axios.get(`https://clinicaltables.nlm.nih.gov/api/rxterms/v3/search?terms=${term}`);
-    const suggestions = response.data[1] || []; 
+    const response = await axios.get(
+      `https://clinicaltables.nlm.nih.gov/api/rxterms/v3/search?terms=${term}`,
+      { timeout: 5000 }
+    );
+
+    const suggestions = response.data[1] || [];
     res.json(suggestions);
   } catch (err) {
-    console.error("RxNav Search Error:", err.message);
+    if (err.code === 'ECONNABORTED' || err.message.includes('timeout')) {
+      console.warn('RxNav Timeout:', err.message);
+      return res.status(504).json({ error: 'الخدمة الطبية الخارجية بطيئة حالياً، يرجى المحاولة مرة أخرى' });
+    }
+    console.error('RxNav Search Error:', err.message);
     res.status(500).json({ error: 'فشل في الاتصال بقاعدة البيانات الطبية' });
   }
 });
