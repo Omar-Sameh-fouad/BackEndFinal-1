@@ -6,6 +6,7 @@ const dbConfig = {
   password: process.env.DB_PASS || '123456', 
   database: process.env.DB_NAME || 'careplus_db',
   waitForConnections: true,
+  multipleStatements: true // <-- هذا السطر ضروري جداً
   connectionLimit: 10
 };
 

@@ -7,6 +7,9 @@ const path = require('path');
 const fs = require('fs');
 const pool = require('../config/db');
 const { verifyToken, authorizeRoles } = require('../middlewares/verifyToken');
+const multer = require('multer');
+const os = require('os');
+const upload = multer({ dest: os.tmpdir() });
 
 // =================== Task 1: Optimized Notifications ===================
 // FIX: Replaced full-table JS forEach with a targeted SQL query that only
@@ -191,77 +194,6 @@ router.get('/logs', verifyToken, authorizeRoles('admin'), async (req, res) => {
   }
 });
 
-/*// =================== Task 2: Safe Backup via mysqldump Stream ===================
-// FIX: Replaced the full in-memory JSON load with a mysqldump child process.
-// The dump is streamed directly to the client as a downloadable .sql file,
-// preventing any RAM accumulation regardless of database size.
-router.get('/backup', verifyToken, authorizeRoles('admin'), async (req, res) => {
-  try {
-    const dbHost     = process.env.DB_HOST     || 'localhost';
-    const dbPort     = process.env.DB_PORT     || '3306';
-    const dbUser     = process.env.DB_USER     || 'root';
-    const dbPassword = process.env.DB_PASSWORD || '';
-    const dbName     = process.env.DB_NAME     || 'careplus';
-
-    // Tables to include in backup — excludes no-value audit noise if desired.
-    // Keeping all app tables to preserve full restore capability.
-    const tables = ['User', 'Medicine', 'Supplier', 'Sale', 'SaleItem', 'ReturnSale', 'Attendance', 'DailyClosing', 'AuditLog', 'ManagerSecurity'];
-
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-    const filename  = `careplus_backup_${timestamp}.sql`;
-
-    // Build the mysqldump command. Password is passed via env var to avoid
-    // it appearing in process lists (MYSQL_PWD is the standard safe approach).
-    const dumpCommand = [
-      'mysqldump',
-      `--host=${dbHost}`,
-      `--port=${dbPort}`,
-      `--user=${dbUser}`,
-      '--single-transaction',
-      '--routines',
-      '--triggers',
-      '--set-gtid-purged=OFF',
-      dbName,
-      ...tables
-    ].join(' ');
-
-    res.setHeader('Content-Type', 'application/octet-stream');
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-
-    const child = exec(dumpCommand, {
-      env: { ...process.env, MYSQL_PWD: dbPassword },
-      maxBuffer: 512 * 1024 * 1024 // 512 MB safety ceiling; stream avoids RAM usage
-    });
-
-    child.stdout.pipe(res);
-
-    child.stderr.on('data', (data) => {
-      // mysqldump writes non-fatal warnings to stderr; log but don't abort
-      console.warn('mysqldump stderr:', data.toString());
-    });
-
-    child.on('error', (err) => {
-      console.error('Backup exec error:', err.message);
-      if (!res.headersSent) {
-        res.status(500).json({ error: 'فشل تشغيل أداة النسخ الاحتياطي على الخادم' });
-      }
-    });
-
-    child.on('close', (code) => {
-      if (code !== 0) {
-        console.error(`mysqldump exited with code ${code}`);
-        if (!res.headersSent) {
-          res.status(500).json({ error: 'حدث خطأ أثناء إنشاء النسخة الاحتياطية' });
-        }
-      }
-    });
-
-  } catch (err) {
-    console.error('Backup Error:', err.message);
-    res.status(500).json({ error: 'حدث خطأ' });
-  }
-});*/
-
 
 // =================== Ultimate Safe Backup (No external tools needed) ===================
 // FIX: Completely bypasses OS commands and buggy NPM packages.
@@ -332,5 +264,37 @@ router.get('/backup', verifyToken, authorizeRoles('admin'), async (req, res) => 
     res.status(500).json({ error: 'حدث خطأ أثناء إنشاء النسخة الاحتياطية' });
   }
 });   
+
+// =================== Restore Database ===================
+// Requires 'multipleStatements: true' in config/db.js
+router.post('/restore', verifyToken, authorizeRoles('admin'), upload.single('backup'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'الرجاء إرفاق ملف النسخة الاحتياطية' });
+    }
+
+    const filePath = req.file.path;
+    
+    // قراءة محتوى الملف بالكامل
+    const sqlDump = fs.readFileSync(filePath, 'utf8');
+
+    // تنفيذ محتوى الملف في قاعدة البيانات
+    await pool.query(sqlDump);
+
+    // تنظيف السيرفر بمسح الملف المؤقت
+    fs.unlinkSync(filePath);
+
+    res.json({ message: 'تم استرجاع قاعدة البيانات بنجاح' });
+  } catch (err) {
+    console.error('Restore Error:', err.message);
+    
+    // تنظيف السيرفر في حالة حدوث خطأ
+    if (req.file && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
+
+    res.status(500).json({ error: 'حدث خطأ أثناء الاسترجاع. تأكد من أن الملف سليم وصالح.' });
+  }
+});
 
 module.exports = router;
