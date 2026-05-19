@@ -191,7 +191,7 @@ router.get('/logs', verifyToken, authorizeRoles('admin'), async (req, res) => {
   }
 });
 
-// =================== Task 2: Safe Backup via mysqldump Stream ===================
+/*// =================== Task 2: Safe Backup via mysqldump Stream ===================
 // FIX: Replaced the full in-memory JSON load with a mysqldump child process.
 // The dump is streamed directly to the client as a downloadable .sql file,
 // preventing any RAM accumulation regardless of database size.
@@ -259,6 +259,64 @@ router.get('/backup', verifyToken, authorizeRoles('admin'), async (req, res) => 
   } catch (err) {
     console.error('Backup Error:', err.message);
     res.status(500).json({ error: 'حدث خطأ' });
+  }
+});*/
+
+
+// =================== Safe Backup via NPM Package ===================
+// FIX: Platform-independent backup using 'mysqldump' npm package.
+// Works seamlessly on Railway, Windows, and Linux without OS dependencies.
+router.get('/backup', verifyToken, authorizeRoles('admin'), async (req, res) => {
+  try {
+    const mysqldump = require('mysqldump');
+    const fs = require('fs');
+    const path = require('path');
+    const os = require('os');
+
+    const dbHost     = process.env.DB_HOST     || 'localhost';
+    const dbPort     = process.env.DB_PORT     || '3306';
+    const dbUser     = process.env.DB_USER     || 'root';
+    const dbPassword = process.env.DB_PASSWORD || '';
+    const dbName     = process.env.DB_NAME     || 'careplus';
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const filename  = `careplus_backup_${timestamp}.sql`;
+    
+    // إنشاء مسار آمن للملف المؤقت يتوافق مع ويندوز ولينكس (Railway)
+    const tempFilePath = path.join(os.tmpdir(), filename);
+
+    // عملية استخراج البيانات
+    await mysqldump({
+      connection: {
+        host: dbHost,
+        port: parseInt(dbPort, 10),
+        user: dbUser,
+        password: dbPassword,
+        database: dbName,
+      },
+      dumpToFile: tempFilePath,
+    });
+
+    // إرسال الملف للمستخدم
+    res.download(tempFilePath, filename, (err) => {
+      if (err) {
+        console.error('Download error:', err.message);
+        if (!res.headersSent) {
+          res.status(500).json({ error: 'حدث خطأ أثناء تحميل الملف' });
+        }
+      }
+      
+      // تنظيف السيرفر: مسح الملف فوراً بعد الإرسال لتوفير المساحة
+      fs.unlink(tempFilePath, (unlinkErr) => {
+        if (unlinkErr) console.error('Cleanup error:', unlinkErr.message);
+      });
+    });
+
+  } catch (err) {
+    console.error('Backup Error:', err.message);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'حدث خطأ أثناء إنشاء النسخة الاحتياطية' });
+    }
   }
 });
 
