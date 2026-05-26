@@ -4,9 +4,9 @@ const { v4: uuidv4 } = require('uuid');
 const pool = require('../config/db');
 const { verifyToken, authorizeRoles } = require('../middlewares/verifyToken');
 
+// ================= CHECK-IN =================
 router.post('/check-in', verifyToken, authorizeRoles('admin', 'delivery', 'pharmacist', 'cashier'), async (req, res) => {
   try {
-    
     const [existing] = await pool.query(
       `SELECT id FROM Attendance WHERE userId = ? AND actionType = 'check-in' AND DATE(timestamp) = CURDATE()`,
       [req.user.id]
@@ -15,27 +15,37 @@ router.post('/check-in', verifyToken, authorizeRoles('admin', 'delivery', 'pharm
       return res.status(400).json({ error: 'تم تسجيل حضورك مسبقاً لهذا اليوم' });
     }
 
-    const sql = `INSERT INTO Attendance (id, userId, userName, actionType) VALUES (?, ?, ?, 'check-in')`;
-    await pool.query(sql, [uuidv4(), req.user.id, req.user.username]);
-    res.json({ message: 'تم تسجيل الحضور بنجاح' });
+    await pool.query(
+      `INSERT INTO Attendance (id, userId, userName, actionType) VALUES (?, ?, ?, 'check-in')`,
+      [uuidv4(), req.user.id, req.user.username]
+    );
+
+    res.json({ 
+      message: 'تم تسجيل الحضور بنجاح',
+      data: {
+        userId: req.user.id,
+        username: req.user.username,
+        action: 'check-in',
+        time: new Date()
+      }
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'خطأ في تسجيل الحضور' });
   }
 });
 
+// ================= CHECK-OUT =================
 router.post('/check-out', verifyToken, authorizeRoles('admin', 'delivery', 'pharmacist', 'cashier'), async (req, res) => {
   try {
-    
-    const [existing] = await pool.query(
+    const [existingOut] = await pool.query(
       `SELECT id FROM Attendance WHERE userId = ? AND actionType = 'check-out' AND DATE(timestamp) = CURDATE()`,
       [req.user.id]
     );
-    if (existing.length > 0) {
+    if (existingOut.length > 0) {
       return res.status(400).json({ error: 'تم تسجيل انصرافك مسبقاً لهذا اليوم' });
     }
 
-    
     const [checkIn] = await pool.query(
       `SELECT id FROM Attendance WHERE userId = ? AND actionType = 'check-in' AND DATE(timestamp) = CURDATE()`,
       [req.user.id]
@@ -44,17 +54,27 @@ router.post('/check-out', verifyToken, authorizeRoles('admin', 'delivery', 'phar
       return res.status(400).json({ error: 'لم يتم تسجيل حضورك لهذا اليوم بعد' });
     }
 
-    const sql = `INSERT INTO Attendance (id, userId, userName, actionType) VALUES (?, ?, ?, 'check-out')`;
-    await pool.query(sql, [uuidv4(), req.user.id, req.user.username]);
-    res.json({ message: 'تم تسجيل الانصراف بنجاح' });
+    await pool.query(
+      `INSERT INTO Attendance (id, userId, userName, actionType) VALUES (?, ?, ?, 'check-out')`,
+      [uuidv4(), req.user.id, req.user.username]
+    );
+
+    res.json({ 
+      message: 'تم تسجيل الانصراف بنجاح',
+      data: {
+        userId: req.user.id,
+        username: req.user.username,
+        action: 'check-out',
+        time: new Date()
+      }
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'خطأ في تسجيل الانصراف' });
   }
 });
 
-
-
+// ================= REPORT =================
 router.get('/report/:userId', verifyToken, authorizeRoles('admin'), async (req, res) => {
   try {
     const { userId } = req.params;
