@@ -5,30 +5,38 @@ const pool = require('../config/db');
 const { verifyToken, authorizeRoles } = require('../middlewares/verifyToken');
 
 // ================= CHECK-IN =================
-router.post('/check-in', verifyToken, authorizeRoles('admin', 'delivery', 'pharmacist', 'cashier'), async (req, res) => {
+router.post('/check-in', verifyToken, authorizeRoles('admin'), async (req, res) => {
   try {
+    const { username } = req.body;
+
+    if (!username) {
+      return res.status(400).json({ error: 'الرجاء إرسال الـ username' });
+    }
+
+    const [user] = await pool.query(
+      'SELECT id, username FROM User WHERE username = ? AND active = 1',
+      [username]
+    );
+
+    if (user.length === 0) {
+      return res.status(404).json({ error: 'الموظف غير موجود' });
+    }
+
     const [existing] = await pool.query(
       `SELECT id FROM Attendance WHERE userId = ? AND actionType = 'check-in' AND DATE(timestamp) = CURDATE()`,
-      [req.user.id]
+      [user[0].id]
     );
+
     if (existing.length > 0) {
-      return res.status(400).json({ error: 'تم تسجيل حضورك مسبقاً لهذا اليوم' });
+      return res.status(400).json({ error: 'تم تسجيل حضور هذا الموظف مسبقاً' });
     }
 
     await pool.query(
       `INSERT INTO Attendance (id, userId, userName, actionType) VALUES (?, ?, ?, 'check-in')`,
-      [uuidv4(), req.user.id, req.user.username]
+      [uuidv4(), user[0].id, user[0].username]
     );
 
-    res.json({ 
-      message: 'تم تسجيل الحضور بنجاح',
-      data: {
-        userId: req.user.id,
-        username: req.user.username,
-        action: 'check-in',
-        time: new Date()
-      }
-    });
+    res.json({ message: `تم تسجيل حضور ${username} بنجاح` });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'خطأ في تسجيل الحضور' });
@@ -36,38 +44,47 @@ router.post('/check-in', verifyToken, authorizeRoles('admin', 'delivery', 'pharm
 });
 
 // ================= CHECK-OUT =================
-router.post('/check-out', verifyToken, authorizeRoles('admin', 'delivery', 'pharmacist', 'cashier'), async (req, res) => {
+router.post('/check-out', verifyToken, authorizeRoles('admin'), async (req, res) => {
   try {
+    const { username } = req.body;
+
+    if (!username) {
+      return res.status(400).json({ error: 'الرجاء إرسال الـ username' });
+    }
+
+    const [user] = await pool.query(
+      'SELECT id, username FROM User WHERE username = ? AND active = 1',
+      [username]
+    );
+
+    if (user.length === 0) {
+      return res.status(404).json({ error: 'الموظف غير موجود' });
+    }
+
     const [existingOut] = await pool.query(
       `SELECT id FROM Attendance WHERE userId = ? AND actionType = 'check-out' AND DATE(timestamp) = CURDATE()`,
-      [req.user.id]
+      [user[0].id]
     );
+
     if (existingOut.length > 0) {
-      return res.status(400).json({ error: 'تم تسجيل انصرافك مسبقاً لهذا اليوم' });
+      return res.status(400).json({ error: 'تم تسجيل انصراف هذا الموظف مسبقاً' });
     }
 
     const [checkIn] = await pool.query(
       `SELECT id FROM Attendance WHERE userId = ? AND actionType = 'check-in' AND DATE(timestamp) = CURDATE()`,
-      [req.user.id]
+      [user[0].id]
     );
+
     if (checkIn.length === 0) {
-      return res.status(400).json({ error: 'لم يتم تسجيل حضورك لهذا اليوم بعد' });
+      return res.status(400).json({ error: 'لم يتم تسجيل حضور هذا الموظف لهذا اليوم بعد' });
     }
 
     await pool.query(
       `INSERT INTO Attendance (id, userId, userName, actionType) VALUES (?, ?, ?, 'check-out')`,
-      [uuidv4(), req.user.id, req.user.username]
+      [uuidv4(), user[0].id, user[0].username]
     );
 
-    res.json({ 
-      message: 'تم تسجيل الانصراف بنجاح',
-      data: {
-        userId: req.user.id,
-        username: req.user.username,
-        action: 'check-out',
-        time: new Date()
-      }
-    });
+    res.json({ message: `تم تسجيل انصراف ${username} بنجاح` });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'خطأ في تسجيل الانصراف' });
