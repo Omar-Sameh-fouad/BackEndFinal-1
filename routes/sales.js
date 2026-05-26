@@ -1,9 +1,9 @@
 const express = require('express');
 const router = express.Router();
-const pool = require('../db');
+const pool = require('../config/db');
 const { v4: uuidv4 } = require('uuid');
-const { verifyToken, authorizeRoles } = require('../middleware/verifyToken');
-const { validateRequest, schemas } = require('../middleware/validator');
+const { verifyToken, authorizeRoles } = require('../middlewares/verifyToken');
+const { validateRequest, schemas } = require('../middlewares/validator');
 
 // ================= Helper: حساب الكمية الفعلية =================
 function calculateFractionalQty(qty, quantityType, stripCount, pillCount) {
