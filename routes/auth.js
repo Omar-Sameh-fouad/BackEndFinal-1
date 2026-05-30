@@ -8,18 +8,12 @@ const nodemailer = require('nodemailer');
 const { JWT_SECRET } = require('../middlewares/verifyToken');
 const { validateRequest, schemas } = require('../middlewares/validator');
 
-// إعداد خدمة إرسال الإيميلات
-// إعداد خدمة إرسال الإيميلات مع إجبار استخدام IPv4
+// إعداد خدمة إرسال الإيميلات (الإعداد الافتراضي)
 const transporter = nodemailer.createTransport({
-  host: 'smtp.gmail.com',
-  port: 465,
-  secure: true, // استخدام SSL
+  service: 'gmail',
   auth: {
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS
-  },
-  tls: {
-    rejectUnauthorized: false // تخطي مشاكل الشهادات المحلية في بيئة التطوير
   }
 });
 
