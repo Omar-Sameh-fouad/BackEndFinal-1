@@ -165,4 +165,67 @@ router.post('/', verifyToken, authorizeRoles('admin', 'pharmacist', 'cashier'), 
   }
 });
 
+// ================= 2. جلب سجل المبيعات (مفصل ويدعم الفلترة باليوم) =================
+router.get('/', verifyToken, authorizeRoles('admin', 'pharmacist'), async (req, res) => {
+  try {
+    const limit = Math.max(1, parseInt(req.query.limit, 10) || 50);
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const offset = (page - 1) * limit;
+    const { date } = req.query; // صيغة التاريخ: YYYY-MM-DD
+
+    let countQuery = 'SELECT COUNT(*) AS total FROM Sale';
+    let dataQuery = 'SELECT id, total, cost, profit, paymentMethod, cashierName, ts FROM Sale';
+    let queryParams = [];
+
+    // لو مبعوت تاريخ، هنجيب المعاملات اليومية التفصيلية لليوم ده بس
+    if (date) {
+      countQuery += ' WHERE DATE(ts) = ?';
+      dataQuery += ' WHERE DATE(ts) = ?';
+      queryParams.push(date);
+    }
+
+    dataQuery += ' ORDER BY ts DESC LIMIT ? OFFSET ?';
+    
+    const [[{ total }]] = await pool.query(countQuery, date ? [date] : []);
+    const [sales] = await pool.query(dataQuery, [...queryParams, limit, offset]);
+
+    res.json({
+      data: sales,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit)
+      }
+    });
+  } catch (err) {
+    console.error("History Error:", err.message);
+    res.status(500).json({ error: 'حدث خطأ أثناء جلب سجل المبيعات' });
+  }
+});
+
+// ================= 3. جلب تفاصيل فاتورة واحدة بالـ ID =================
+router.get('/:id', verifyToken, authorizeRoles('admin', 'pharmacist', 'cashier'), async (req, res) => {
+  try {
+    const saleId = req.params.id;
+
+    // جلب بيانات الفاتورة الأساسية
+    const [sale] = await pool.query('SELECT * FROM Sale WHERE id = ?', [saleId]);
+    if (sale.length === 0) {
+      return res.status(404).json({ error: 'الفاتورة غير موجودة' });
+    }
+
+    // جلب عناصر الفاتورة (الأدوية المباعة)
+    const [items] = await pool.query('SELECT * FROM SaleItem WHERE saleId = ?', [saleId]);
+
+    res.json({
+      ...sale[0],
+      items
+    });
+  } catch (err) {
+    console.error("Invoice Error:", err.message);
+    res.status(500).json({ error: 'حدث خطأ أثناء جلب الفاتورة' });
+  }
+});
+
 module.exports = router;
