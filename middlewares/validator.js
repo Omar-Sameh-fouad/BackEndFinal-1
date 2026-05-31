@@ -6,7 +6,7 @@ const schemas = {
     fullName: Joi.string().required(),
     email: Joi.string().email().allow('', null),
     phone: Joi.string().pattern(/^[0-9]+$/),
-    role: Joi.string().valid('admin', 'pharmacist', 'delivery', 'cashier').required(), 
+    role: Joi.string().valid('admin', 'pharmacist', 'delivery', 'cashier').required(),
     password: Joi.string().min(6).required(),
     expectedDays: Joi.number().integer().min(1).max(31).optional(),
     dailyHours: Joi.number().integer().min(1).max(24).optional()
@@ -18,7 +18,7 @@ const schemas = {
     email: Joi.string().email().allow('', null),
     phone: Joi.string().pattern(/^[0-9]+$/),
     role: Joi.string().valid('admin', 'pharmacist', 'delivery', 'cashier').required(),
-    password: Joi.string().min(6).optional().allow('', null), 
+    password: Joi.string().min(6).optional().allow('', null),
     expectedDays: Joi.number().integer().min(1).max(31).optional(),
     dailyHours: Joi.number().integer().min(1).max(24).optional(),
     active: Joi.number().valid(0, 1).optional()
@@ -33,11 +33,11 @@ const schemas = {
     sellingPrice: Joi.number().min(0).required(),
     requiresPrescription: Joi.boolean().optional(),
     supplierId: Joi.string().optional().allow('', null),
-    pillCount: Joi.number().integer().min(0).optional().allow(null), 
+    pillCount: Joi.number().integer().min(0).optional().allow(null),
     stripCount: Joi.number().integer().min(0).optional().allow(null),
-    manufacturer: Joi.string().optional().allow('', null), 
-    genericName: Joi.string().optional().allow('', null), 
-    medicineForm: Joi.string().optional().allow('', null) 
+    manufacturer: Joi.string().optional().allow('', null),
+    genericName: Joi.string().optional().allow('', null),
+    medicineForm: Joi.string().optional().allow('', null)
   }),
 
   login: Joi.object({
@@ -57,51 +57,62 @@ const schemas = {
     address: Joi.string().optional().allow('', null)
   }),
 
- /* sale: Joi.object({
-    paymentMethod: Joi.string().valid('cash', 'card', 'wallet', 'insurance').required(),
-    // ✅ FIX: أضفنا forceInteraction عشان Joi ما يرفضهاش
-    forceInteraction: Joi.boolean().optional().default(false),
-    items: Joi.array().items(
-      Joi.object({
-        medicineId: Joi.string().required(),
-        qty: Joi.number().positive().required(), 
-        quantityType: Joi.string().valid('box', 'strip', 'pill').required()
-      })
-    ).min(1).required()
+  sale: Joi.object({
+    paymentMethod: Joi.string()
+      .valid('cash', 'card', 'wallet', 'insurance')
+      .required(),
+
+    forceInteraction: Joi.boolean()
+      .optional()
+      .default(false),
+
+    items: Joi.array()
+      .items(
+        Joi.object({
+          medicineId: Joi.string().required(),
+          qty: Joi.number().positive().required(),
+          quantityType: Joi.string()
+            .valid('box', 'strip', 'pill')
+            .required(),
+
+          stripCount: Joi.number()
+            .integer()
+            .min(0)
+            .optional()
+            .allow(null),
+
+          pillCount: Joi.number()
+            .integer()
+            .min(0)
+            .optional()
+            .allow(null)
+        })
+      )
+      .min(1)
+      .required()
   }),
 
   returnSale: Joi.object({
     saleId: Joi.string().required(),
     returnedItems: Joi.array().items(
       Joi.object({
-        saleItemId: Joi.string().required(), 
-        qtyToReturn: Joi.number().positive().required() 
+        saleItemId: Joi.string().required(),
+        qtyToReturn: Joi.number().positive().required()
       })
     ).min(1).required()
   })
-};*/
-
-sale: Joi.object({
-  paymentMethod: Joi.string().valid('cash', 'card', 'wallet', 'insurance').required(),
-  forceInteraction: Joi.boolean().optional().default(false),
-  items: Joi.array().items(
-    Joi.object({
-      medicineId: Joi.string().required(),
-      qty: Joi.number().positive().required(),
-      quantityType: Joi.string().valid('box', 'strip', 'pill').required(),
-
-      stripCount: Joi.number().integer().min(0).optional().allow(null),
-      pillCount: Joi.number().integer().min(0).optional().allow(null)
-    })
-  ).min(1).required()
-});
+};
 
 const validateRequest = (schema) => {
   return (req, res, next) => {
     const { error } = schema.validate(req.body);
+
     if (error) {
-      return res.status(400).json({ error: error.details[0].message });
+      return res.status(400).json({
+        error: error.details[0].message
+      });
     }
+
     next();
   };
 };
