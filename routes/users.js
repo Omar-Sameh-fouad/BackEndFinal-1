@@ -19,6 +19,12 @@ router.get('/', verifyToken, authorizeRoles('admin', 'pharmacist'), async (req, 
 router.post('/', verifyToken, authorizeRoles('admin'), validateRequest(schemas.user), async (req, res) => {
   try {
     const { username, fullName, email, phone, role, password, expectedDays, dailyHours } = req.body;
+    
+    // التحقق من أن كلمة المرور 6 رموز بالضبط
+    if (!password || password.length !== 6) {
+       return res.status(400).json({ error: 'كلمة المرور يجب أن تكون 6 أحرف/أرقام بالضبط' });
+    }
+
     const hashedPassword = await bcrypt.hash(password, 10);
 
     const sql = `INSERT INTO User (id, username, fullName, email, phone, role, password, active, dailyHours, expectedDays) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`;
@@ -48,6 +54,10 @@ router.put('/:id', verifyToken, authorizeRoles('admin'), validateRequest(schemas
 
     let sql, params;
     if (password && password.trim() !== '') {
+      // التحقق من الطول عند تغيير الباسوورد فقط
+      if (password.length !== 6) {
+        return res.status(400).json({ error: 'كلمة المرور يجب أن تكون 6 أحرف او ارقام ' });
+      }
       const hashedPassword = await bcrypt.hash(password, 10);
       sql = `UPDATE User SET username=?, fullName=?, email=?, phone=?, role=?, password=?, dailyHours=?, expectedDays=?, active=? WHERE id=?`;
       params = [username, fullName, email, phone, role, hashedPassword, dailyHours, expectedDays, active, id];
