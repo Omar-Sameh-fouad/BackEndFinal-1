@@ -52,6 +52,34 @@ router.get('/search/:barcode', verifyToken, authorizeRoles('admin', 'pharmacist'
   } catch (err) { res.status(500).json({ error: 'حدث خطأ في البحث' }); }
 });
 
+// البحث بالاسم
+router.get('/search-by-name', verifyToken, authorizeRoles('admin', 'pharmacist', 'cashier'), async (req, res) => {
+  try {
+    const { q } = req.query;
+    if (!q || q.trim().length < 2) return res.json([]);
+
+    const searchTerm = `%${q.trim()}%`;
+    const [medicines] = await pool.query(
+      `SELECT id, name, genericName, sellingPrice, quantity, stripCount, pillCount
+       FROM Medicine 
+       WHERE name LIKE ? OR genericName LIKE ?
+       ORDER BY name ASC
+       LIMIT 15`,
+      [searchTerm, searchTerm]
+    );
+
+    const results = medicines.map(med => ({
+      ...med,
+      quantity: parseFloat(med.quantity),
+      sellingPrice: parseFloat(med.sellingPrice),
+    }));
+
+    res.json(results);
+  } catch (err) {
+    res.status(500).json({ error: 'حدث خطأ في البحث' });
+  }
+});
+
 // إضافة دواء جديد
 router.post('/', verifyToken, authorizeRoles('admin', 'pharmacist'), validateRequest(schemas.medicine), async (req, res) => {
   try {
