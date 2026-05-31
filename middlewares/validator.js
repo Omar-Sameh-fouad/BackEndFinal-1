@@ -94,7 +94,7 @@ sale: Joi.object({
       pillCount: Joi.number().integer().min(0).optional().allow(null)
     })
   ).min(1).required()
-})
+});
 
 const validateRequest = (schema) => {
   return (req, res, next) => {
