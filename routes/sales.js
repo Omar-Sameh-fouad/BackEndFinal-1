@@ -166,37 +166,44 @@ router.post('/', verifyToken, authorizeRoles('admin', 'pharmacist', 'cashier'), 
 });
 
 // ================= 2. جلب سجل المبيعات (مفصل ويدعم الفلترة باليوم) =================
-router.get('/', verifyToken, authorizeRoles('admin', 'pharmacist'), async (req, res) => {
+// admin/pharmacist → يشوف كل المبيعات
+// cashier         → يشوف مبيعاته هو بس (فلترة تلقائية بالـ JWT)
+router.get('/', verifyToken, authorizeRoles('admin', 'pharmacist', 'cashier'), async (req, res) => {
   try {
     const limit = Math.max(1, parseInt(req.query.limit, 10) || 50);
-    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const page  = Math.max(1, parseInt(req.query.page,  10) || 1);
     const offset = (page - 1) * limit;
-    const { date } = req.query; // صيغة التاريخ: YYYY-MM-DD
+    const { date } = req.query;
 
-    let countQuery = 'SELECT COUNT(*) AS total FROM Sale';
-    let dataQuery = 'SELECT id, total, cost, profit, paymentMethod, cashierName, ts FROM Sale';
-    let queryParams = [];
+    const isRestrictedRole = req.user.role === 'cashier';
 
-    // لو مبعوت تاريخ، هنجيب المعاملات اليومية التفصيلية لليوم ده بس
+    const conditions = [];
+    const queryParams = [];
+
+    // الكاشير يشوف مبيعاته بس — مش ممكن يتخطى الفلتر ده حتى لو بعت cashierId مختلف
+    if (isRestrictedRole) {
+      conditions.push('cashierId = ?');
+      queryParams.push(req.user.id);
+    }
+
     if (date) {
-      countQuery += ' WHERE DATE(ts) = ?';
-      dataQuery += ' WHERE DATE(ts) = ?';
+      conditions.push('DATE(ts) = ?');
       queryParams.push(date);
     }
 
-    dataQuery += ' ORDER BY ts DESC LIMIT ? OFFSET ?';
-    
-    const [[{ total }]] = await pool.query(countQuery, date ? [date] : []);
-    const [sales] = await pool.query(dataQuery, [...queryParams, limit, offset]);
+    const whereClause = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : '';
+
+    const countQuery = `SELECT COUNT(*) AS total FROM Sale ${whereClause}`;
+    const dataQuery  = `SELECT id, total, cost, profit, paymentMethod, cashierName, ts 
+                        FROM Sale ${whereClause} 
+                        ORDER BY ts DESC LIMIT ? OFFSET ?`;
+
+    const [[{ total }]] = await pool.query(countQuery, queryParams);
+    const [sales]        = await pool.query(dataQuery,  [...queryParams, limit, offset]);
 
     res.json({
       data: sales,
-      pagination: {
-        total,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit)
-      }
+      pagination: { total, page, limit, totalPages: Math.ceil(total / limit) }
     });
   } catch (err) {
     console.error("History Error:", err.message);
