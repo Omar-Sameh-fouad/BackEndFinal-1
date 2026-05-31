@@ -15,17 +15,15 @@ function calculateFractionalQty(qty, quantityType, stripCount, pillCount) {
 
 // ================= Helper: فحص التعارضات =================
 async function checkInteractions(items) {
-  // ✅ FIX: تحسين parsing الـ genericName - بنأخذ أول كلمة بعد تنظيف الـ string
   const genericNames = [...new Set(
     items
       .filter(item => item.genericName && item.genericName.trim() !== '')
       .map(item => {
-        // نزيل الأرقام والجرعات ونأخذ الاسم الفعال فقط
         return item.genericName
           .toLowerCase()
           .replace(/[0-9]+\s*(mg|ml|mcg|g|iu|%)/gi, '')
           .trim()
-          .split(/[\s+\/]+/)[0]; // نقسم على مسافة أو + أو /
+          .split(/[\s+\/]+/)[0]; 
       })
       .filter(name => name.length > 0)
   )];
@@ -34,8 +32,6 @@ async function checkInteractions(items) {
     return { hasInteraction: false, details: [] };
   }
 
-  // ⚠️  Mock Database - استبدلها بجدول DrugInteractions في قاعدة البيانات
-  // مثال الجدول: CREATE TABLE DrugInteractions (drug1 VARCHAR(100), drug2 VARCHAR(100), severity ENUM('high','moderate','low'), description TEXT)
   const mockDatabase = {
     'aspirin-warfarin': { severity: 'high', description: 'تحذير: الأسبرين مع الوارفارين يزيد خطر النزيف' },
     'ibuprofen-aspirin': { severity: 'moderate', description: 'الإيبوبروفين يقلل فاعلية الأسبرين' }
@@ -54,17 +50,15 @@ async function checkInteractions(items) {
   return { hasInteraction: interactions.length > 0, details: interactions };
 }
 
-// ================= 1. عملية البيع (مع فحص التعارضات) =================
+// ================= 1. عملية البيع =================
 router.post('/', verifyToken, authorizeRoles('admin', 'pharmacist', 'cashier'), validateRequest(schemas.sale), async (req, res) => {
   const connection = await pool.getConnection();
 
   try {
-    // ✅ FIX: beginTransaction لازم تيجي الأول قبل أي قراءة أو كتابة
     await connection.beginTransaction();
 
     const { paymentMethod, items, forceInteraction } = req.body;
 
-    // ========== الخطوة 1: جلب الأدوية ==========
     const medicineIds = items.map(item => item.medicineId);
     const placeholders = medicineIds.map(() => '?').join(',');
     const [medicines] = await connection.query(
@@ -79,12 +73,9 @@ router.post('/', verifyToken, authorizeRoles('admin', 'pharmacist', 'cashier'), 
       return { ...item, ...medicine };
     });
 
-    // ========== الخطوة 2: فحص التعارضات ==========
     const interactions = await checkInteractions(itemsWithDetails);
 
-    // ========== الخطوة 3: إذا فيه تعارض والمستخدم ما وافقش ==========
     if (interactions.hasInteraction && !forceInteraction) {
-      // ✅ FIX: rollback قبل ما نرجع الـ 409 عشان نحرر الـ connection صح
       await connection.rollback();
       return res.status(409).json({
         error: 'يوجد تعارض دوائي',
@@ -94,7 +85,6 @@ router.post('/', verifyToken, authorizeRoles('admin', 'pharmacist', 'cashier'), 
       });
     }
 
-    // ========== الخطوة 4: تسجيل في AuditLog لو تجاوز التحذير ==========
     if (interactions.hasInteraction && forceInteraction) {
       await connection.query(
         `INSERT INTO AuditLog (id, actorId, actorName, action, details, severity) 
@@ -104,7 +94,6 @@ router.post('/', verifyToken, authorizeRoles('admin', 'pharmacist', 'cashier'), 
       );
     }
 
-    // ========== الخطوة 5: إنشاء الفاتورة ==========
     const cashierId = req.user.id;
     const cashierName = req.user.username;
     const saleId = uuidv4();
@@ -165,20 +154,32 @@ router.post('/', verifyToken, authorizeRoles('admin', 'pharmacist', 'cashier'), 
   }
 });
 
-// ================= 2. جلب سجل المبيعات (مفصل ويدعم الفلترة باليوم) =================
+// ================= 2. جلب سجل المبيعات (دعم الفلترة بفترة أو يوم) =================
 router.get('/', verifyToken, authorizeRoles('admin', 'pharmacist', 'cashier'), async (req, res) => {
   try {
     const limit = Math.max(1, parseInt(req.query.limit, 10) || 50);
     const page  = Math.max(1, parseInt(req.query.page,  10) || 1);
     const offset = (page - 1) * limit;
-    const { date } = req.query;
+    
+    // سحب بارامترات الفلترة الجديدة
+    const { date, startDate, endDate } = req.query;
 
-    // الـ admin يشوف كل المبيعات، وباقي الرولز يشوفوا بتاعتهم بس
     const isAdmin = req.user.role === 'admin';
     const conditions = isAdmin ? [] : ['cashierId = ?'];
     const queryParams = isAdmin ? [] : [req.user.id];
 
-    if (date) {
+    // فلترة التواريخ المحدثة
+    if (startDate && endDate) {
+      conditions.push('DATE(ts) BETWEEN ? AND ?');
+      queryParams.push(startDate, endDate);
+    } else if (startDate) {
+      conditions.push('DATE(ts) >= ?');
+      queryParams.push(startDate);
+    } else if (endDate) {
+      conditions.push('DATE(ts) <= ?');
+      queryParams.push(endDate);
+    } else if (date) {
+      // للحفاظ على توافق الشاشات القديمة (زي شاشة الكاشير)
       conditions.push('DATE(ts) = ?');
       queryParams.push(date);
     }
@@ -203,18 +204,16 @@ router.get('/', verifyToken, authorizeRoles('admin', 'pharmacist', 'cashier'), a
   }
 });
 
-// ================= 3. جلب تفاصيل فاتورة واحدة بالـ ID =================
+// ================= 3. جلب تفاصيل فاتورة واحدة =================
 router.get('/:id', verifyToken, authorizeRoles('admin', 'pharmacist', 'cashier'), async (req, res) => {
   try {
     const saleId = req.params.id;
 
-    // جلب بيانات الفاتورة الأساسية
     const [sale] = await pool.query('SELECT * FROM Sale WHERE id = ?', [saleId]);
     if (sale.length === 0) {
       return res.status(404).json({ error: 'الفاتورة غير موجودة' });
     }
 
-    // جلب عناصر الفاتورة (الأدوية المباعة)
     const [items] = await pool.query('SELECT * FROM SaleItem WHERE saleId = ?', [saleId]);
 
     res.json({
