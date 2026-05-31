@@ -11,7 +11,6 @@ const multer = require('multer');
 const os = require('os');
 const upload = multer({ dest: os.tmpdir() });
 
-
 router.get('/notifications', verifyToken, authorizeRoles('admin', 'pharmacist'), async (req, res) => {
   try {
     const [medicines] = await pool.query(`
@@ -26,68 +25,38 @@ router.get('/notifications', verifyToken, authorizeRoles('admin', 'pharmacist'),
 
     medicines.forEach(med => {
       med.quantity = parseFloat(med.quantity);
-      // --- Stock alerts ---
       if (med.quantity === 0) {
-        alerts.push({
-          id: uuidv4(),
-          type: 'low_stock',
-          urgent: true,
-          title: `نفاد كمية: ${med.name}`,
-          message: `الكمية صفر! يرجى الطلب فوراً.`
-        });
+        alerts.push({ id: uuidv4(), type: 'low_stock', urgent: true, title: `نفاد كمية: ${med.name}`, message: `الكمية صفر! يرجى الطلب فوراً.` });
       } else if (med.quantity <= 10) {
-        alerts.push({
-          id: uuidv4(),
-          type: 'low_stock',
-          urgent: false,
-          title: `نقص مخزون: ${med.name}`,
-          message: `متبقي ${med.quantity} علبة فقط.`
-        });
+        alerts.push({ id: uuidv4(), type: 'low_stock', urgent: false, title: `نقص مخزون: ${med.name}`, message: `متبقي ${med.quantity} علبة فقط.` });
       }
 
-      // --- Expiry alerts ---
       const expiryDate = new Date(med.expiryDate);
       const diffDays = Math.ceil((expiryDate - today) / (1000 * 60 * 60 * 24));
       if (diffDays < 0) {
-        alerts.push({
-          id: uuidv4(),
-          type: 'expiry',
-          urgent: true,
-          title: `دواء منتهي الصلاحية: ${med.name}`,
-          message: `انتهت صلاحيته.`
-        });
+        alerts.push({ id: uuidv4(), type: 'expiry', urgent: true, title: `دواء منتهي الصلاحية: ${med.name}`, message: `انتهت صلاحيته.` });
       } else if (diffDays <= 30) {
-        alerts.push({
-          id: uuidv4(),
-          type: 'expiry',
-          urgent: true,
-          title: `صلاحية توشك على الانتهاء: ${med.name}`,
-          message: `سينتهي قريباً.`
-        });
+        alerts.push({ id: uuidv4(), type: 'expiry', urgent: true, title: `صلاحية توشك على الانتهاء: ${med.name}`, message: `سينتهي قريباً.` });
       }
     });
-
     res.json(alerts);
-  } catch (err) {
-    console.error('Notifications Error:', err.message);
-    res.status(500).json({ error: 'حدث خطأ في الخادم' });
-  }
+  } catch (err) { res.status(500).json({ error: 'حدث خطأ في الخادم' }); }
 });
 
-// admin/pharmacist → يشوف كل مبيعات اليوم
-// cashier         → يشوف مبيعاته هو بس
+// =================== تقرير الوردية الحالية (العداد الحالي) ===================
 router.get('/reports/today', verifyToken, authorizeRoles('admin', 'pharmacist', 'cashier'), async (req, res) => {
   try {
     const isCashier = req.user.role === 'cashier';
     const cashierFilter = isCashier ? 'AND cashierId = ?' : '';
     const cashierParams = isCashier ? [req.user.id] : [];
 
+    // التعديل: تجميع المبيعات اللي (isClosed = FALSE) عشان العداد يصفر بعد التقفيل
     const [sales] = await pool.query(
-      `SELECT paymentMethod, SUM(total) as amount FROM Sale WHERE DATE(ts) = CURDATE() ${cashierFilter} GROUP BY paymentMethod`,
+      `SELECT paymentMethod, SUM(total) as amount FROM Sale WHERE isClosed = FALSE ${cashierFilter} GROUP BY paymentMethod`,
       cashierParams
     );
     const [[countData]] = await pool.query(
-      `SELECT COUNT(id) as count FROM Sale WHERE DATE(ts) = CURDATE() ${cashierFilter}`,
+      `SELECT COUNT(id) as count FROM Sale WHERE isClosed = FALSE ${cashierFilter}`,
       cashierParams
     );
 
@@ -97,13 +66,12 @@ router.get('/reports/today', verifyToken, authorizeRoles('admin', 'pharmacist', 
 
     res.json({ totals, grandTotal, salesCount: countData.count });
   } catch (err) {
-    console.error('Today Report Error:', err.message);
+    console.error('Shift Report Error:', err.message);
     res.status(500).json({ error: 'حدث خطأ' });
   }
 });
 
-// admin/pharmacist → يشوف كل التقارير التاريخية
-// cashier         → يشوف تقاريره هو بس
+// =================== التقارير التاريخية ===================
 router.get('/reports/historical', verifyToken, authorizeRoles('admin', 'pharmacist', 'cashier'), async (req, res) => {
   try {
     const { range } = req.query;
@@ -131,10 +99,7 @@ router.get('/reports/historical', verifyToken, authorizeRoles('admin', 'pharmaci
     data.forEach(d => { overall.total += Number(d.total); overall.profit += Number(d.profit); overall.count += d.count; });
 
     res.json({ history: data, overall });
-  } catch (err) {
-    console.error('Historical Report Error:', err.message);
-    res.status(500).json({ error: 'حدث خطأ' });
-  }
+  } catch (err) { res.status(500).json({ error: 'حدث خطأ' }); }
 });
 
 router.get('/security', verifyToken, authorizeRoles('admin', 'pharmacist'), async (req, res) => {
@@ -169,36 +134,43 @@ router.post('/security/reset-pin', verifyToken, authorizeRoles('admin'), async (
   } catch (err) { res.status(500).json({ error: 'حدث خطأ' }); }
 });
 
-// =================== تقفيل اليوم المعدل ===================
+// =================== تقفيل الوردية (تصفير العداد) ===================
 router.post('/daily-closing', verifyToken, authorizeRoles('admin', 'pharmacist'), async (req, res) => {
+  const connection = await pool.getConnection();
   try {
     const { date, totals, grandTotal, salesCount, closedByName, closedById, pin } = req.body;
     
-    // جلب رقم الموظف الحالي من الـ Token
     const userId = req.user.id;
-
-    // جلب الباسوورد الخاص به من جدول User
-    const [userDb] = await pool.query('SELECT password FROM User WHERE id = ?', [userId]);
+    const [userDb] = await connection.query('SELECT password FROM User WHERE id = ?', [userId]);
     
-    if (userDb.length === 0) {
-      return res.status(401).json({ error: 'المستخدم غير موجود' });
-    }
+    if (userDb.length === 0) return res.status(401).json({ error: 'المستخدم غير موجود' });
 
-    // مقارنة كلمة المرور المُدخلة مع كلمة مرور الحساب
     const isValid = await bcrypt.compare(pin, userDb[0].password);
-    if (!isValid) {
-      return res.status(401).json({ error: 'كلمة المرور غير صحيحة' });
-    }
+    if (!isValid) return res.status(401).json({ error: 'كلمة المرور غير صحيحة' });
 
+    await connection.beginTransaction();
+
+    // 1. تسجيل لقطة الوردية في التقرير
     const sql = `INSERT INTO DailyClosing (id, date, totals, grandTotal, salesCount, closedByName, closedById) VALUES (?, ?, ?, ?, ?, ?, ?)`;
-    await pool.query(sql, [uuidv4(), date, JSON.stringify(totals), grandTotal, salesCount, closedByName, closedById]);
-    res.json({ message: 'تم تقفيل اليوم بنجاح' });
+    await connection.query(sql, [uuidv4(), date, JSON.stringify(totals), grandTotal, salesCount, closedByName, closedById]);
+    
+    // 2. تصفير العداد: إغلاق كل الفواتير المفتوحة
+    const isCashier = req.user.role === 'cashier';
+    const cashierFilter = isCashier ? 'AND cashierId = ?' : '';
+    const cashierParams = isCashier ? [req.user.id] : [];
+    
+    await connection.query(`UPDATE Sale SET isClosed = TRUE WHERE isClosed = FALSE ${cashierFilter}`, cashierParams);
+
+    await connection.commit();
+    res.json({ message: 'تم تقفيل الوردية وتصفير العداد بنجاح' });
   } catch (err) { 
+    await connection.rollback();
     console.error(err);
-    res.status(500).json({ error: 'حدث خطأ أثناء تقفيل اليوم' }); 
+    res.status(500).json({ error: 'حدث خطأ أثناء تقفيل الوردية' }); 
+  } finally {
+    connection.release();
   }
 });
-// ==========================================================
 
 router.post('/logs', verifyToken, authorizeRoles('admin'), async (req, res) => {
   try {
@@ -221,118 +193,54 @@ router.get('/logs', verifyToken, authorizeRoles('admin'), async (req, res) => {
       [limit, offset]
     );
 
-    res.json({
-      data: logs,
-      pagination: {
-        total,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit)
-      }
-    });
-  } catch (err) {
-    console.error('Logs Error:', err.message);
-    res.status(500).json({ error: 'تفاصيل الخطأ: ' + err.message });
-  }
+    res.json({ data: logs, pagination: { total, page, limit, totalPages: Math.ceil(total / limit) } });
+  } catch (err) { res.status(500).json({ error: 'تفاصيل الخطأ: ' + err.message }); }
 });
-
-
 
 router.get('/backup', verifyToken, authorizeRoles('admin'), async (req, res) => {
   try {
-    // قائمة الجداول في قاعدة البيانات الخاصة بك
     const tables = ['User', 'Medicine', 'Supplier', 'Sale', 'SaleItem', 'ReturnSale', 'Attendance', 'DailyClosing', 'AuditLog', 'ManagerSecurity'];
-    
-    let sqlDump = `-- CarePlus Pharmacy Backup\n-- Date: ${new Date().toLocaleString('en-US')}\n\n`;
-    sqlDump += `SET FOREIGN_KEY_CHECKS=0;\n\n`; // لإيقاف فحص الروابط مؤقتاً أثناء الاسترجاع
+    let sqlDump = `-- CarePlus Pharmacy Backup\n-- Date: ${new Date().toLocaleString('en-US')}\n\nSET FOREIGN_KEY_CHECKS=0;\n\n`;
 
     for (const table of tables) {
-      // 1. جلب هيكل الجدول (Schema)
       const [schemaRows] = await pool.query(`SHOW CREATE TABLE \`${table}\``);
       if (schemaRows.length > 0) {
-        sqlDump += `-- --------------------------------------------------------\n`;
-        sqlDump += `-- Table structure for \`${table}\`\n`;
-        sqlDump += `-- --------------------------------------------------------\n`;
-        sqlDump += `DROP TABLE IF EXISTS \`${table}\`;\n`;
-        sqlDump += `${schemaRows[0]['Create Table']};\n\n`;
+        sqlDump += `DROP TABLE IF EXISTS \`${table}\`;\n${schemaRows[0]['Create Table']};\n\n`;
       }
-
-      // 2. جلب بيانات الجدول (Data)
       const [rows] = await pool.query(`SELECT * FROM \`${table}\``);
       if (rows.length > 0) {
-        sqlDump += `-- Dumping data for table \`${table}\`\n`;
-        
         for (const row of rows) {
           const columns = Object.keys(row).map(c => `\`${c}\``).join(', ');
-          
           const values = Object.values(row).map(val => {
             if (val === null) return 'NULL';
-            if (typeof val === 'string') {
-              // حماية وتنظيف النصوص من علامات التنصيص
-              const escaped = val.replace(/\\/g, '\\\\').replace(/'/g, "''").replace(/\n/g, '\\n').replace(/\r/g, '\\r');
-              return `'${escaped}'`;
-            }
-            if (val instanceof Date) {
-              // تحويل التاريخ لصيغة تناسب MySQL
-              return `'${val.toISOString().slice(0, 19).replace('T', ' ')}'`;
-            }
-            if (typeof val === 'object') {
-              const escapedJson = JSON.stringify(val).replace(/\\/g, '\\\\').replace(/'/g, "''");
-              return `'${escapedJson}'`;
-            }
+            if (typeof val === 'string') return `'${val.replace(/\\/g, '\\\\').replace(/'/g, "''").replace(/\n/g, '\\n').replace(/\r/g, '\\r')}'`;
+            if (val instanceof Date) return `'${val.toISOString().slice(0, 19).replace('T', ' ')}'`;
+            if (typeof val === 'object') return `'${JSON.stringify(val).replace(/\\/g, '\\\\').replace(/'/g, "''")}'`;
             return val;
           }).join(', ');
-          
           sqlDump += `INSERT INTO \`${table}\` (${columns}) VALUES (${values});\n`;
         }
         sqlDump += `\n\n`;
       }
     }
-
-    sqlDump += `SET FOREIGN_KEY_CHECKS=1;\n`; // إعادة تفعيل الروابط
-
+    sqlDump += `SET FOREIGN_KEY_CHECKS=1;\n`;
 
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-    const filename = `careplus_backup_${timestamp}.sql`;
-
     res.setHeader('Content-Type', 'application/octet-stream');
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Disposition', `attachment; filename="careplus_backup_${timestamp}.sql"`);
     res.send(sqlDump);
-
-  } catch (err) {
-    console.error('Backup Error:', err.message);
-    res.status(500).json({ error: 'حدث خطأ أثناء إنشاء النسخة الاحتياطية' });
-  }
+  } catch (err) { res.status(500).json({ error: 'حدث خطأ أثناء إنشاء النسخة الاحتياطية' }); }
 });   
-
-// =================== Restore Database ===================
 
 router.post('/restore', verifyToken, authorizeRoles('admin'), upload.single('backup'), async (req, res) => {
   try {
-    if (!req.file) {
-      return res.status(400).json({ error: 'الرجاء إرفاق ملف النسخة الاحتياطية' });
-    }
-
-    const filePath = req.file.path;
-    
-    // قراءة محتوى الملف بالكامل
-    const sqlDump = fs.readFileSync(filePath, 'utf8');
-
-    // تنفيذ محتوى الملف في قاعدة البيانات
+    if (!req.file) return res.status(400).json({ error: 'الرجاء إرفاق ملف النسخة الاحتياطية' });
+    const sqlDump = fs.readFileSync(req.file.path, 'utf8');
     await pool.query(sqlDump);
-
-    // تنظيف السيرفر بمسح الملف المؤقت
-    fs.unlinkSync(filePath);
-
+    fs.unlinkSync(req.file.path);
     res.json({ message: 'تم استرجاع قاعدة البيانات بنجاح' });
   } catch (err) {
-    console.error('Restore Error:', err.message);
-    
-    // تنظيف السيرفر في حالة حدوث خطأ
-    if (req.file && fs.existsSync(req.file.path)) {
-      fs.unlinkSync(req.file.path);
-    }
-
+    if (req.file && fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
     res.status(500).json({ error: 'حدث خطأ أثناء الاسترجاع. تأكد من أن الملف سليم وصالح.' });
   }
 });
