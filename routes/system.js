@@ -74,38 +74,67 @@ router.get('/notifications', verifyToken, authorizeRoles('admin', 'pharmacist'),
   }
 });
 
-router.get('/reports/today', verifyToken, authorizeRoles('admin', 'pharmacist'), async (req, res) => {
+// admin/pharmacist → يشوف كل مبيعات اليوم
+// cashier         → يشوف مبيعاته هو بس
+router.get('/reports/today', verifyToken, authorizeRoles('admin', 'pharmacist', 'cashier'), async (req, res) => {
   try {
-    const [sales] = await pool.query('SELECT paymentMethod, SUM(total) as amount FROM Sale WHERE DATE(ts) = CURDATE() GROUP BY paymentMethod');
-    const [countData] = await pool.query('SELECT COUNT(id) as count FROM Sale WHERE DATE(ts) = CURDATE()');
+    const isCashier = req.user.role === 'cashier';
+    const cashierFilter = isCashier ? 'AND cashierId = ?' : '';
+    const cashierParams = isCashier ? [req.user.id] : [];
+
+    const [sales] = await pool.query(
+      `SELECT paymentMethod, SUM(total) as amount FROM Sale WHERE DATE(ts) = CURDATE() ${cashierFilter} GROUP BY paymentMethod`,
+      cashierParams
+    );
+    const [[countData]] = await pool.query(
+      `SELECT COUNT(id) as count FROM Sale WHERE DATE(ts) = CURDATE() ${cashierFilter}`,
+      cashierParams
+    );
+
     let totals = { cash: 0, card: 0, wallet: 0, insurance: 0 };
     let grandTotal = 0;
-    sales.forEach(s => { totals[s.paymentMethod] = s.amount; grandTotal += s.amount; });
-    res.json({ totals, grandTotal, salesCount: countData[0].count });
-  } catch (err) { res.status(500).json({ error: 'حدث خطأ' }); }
+    sales.forEach(s => { totals[s.paymentMethod] = Number(s.amount); grandTotal += Number(s.amount); });
+
+    res.json({ totals, grandTotal, salesCount: countData.count });
+  } catch (err) {
+    console.error('Today Report Error:', err.message);
+    res.status(500).json({ error: 'حدث خطأ' });
+  }
 });
 
-router.get('/reports/historical', verifyToken, authorizeRoles('admin', 'pharmacist'), async (req, res) => {
+// admin/pharmacist → يشوف كل التقارير التاريخية
+// cashier         → يشوف تقاريره هو بس
+router.get('/reports/historical', verifyToken, authorizeRoles('admin', 'pharmacist', 'cashier'), async (req, res) => {
   try {
     const { range } = req.query;
+    const isCashier = req.user.role === 'cashier';
+    const cashierFilter = isCashier ? 'AND cashierId = ?' : '';
+    const cashierParam  = isCashier ? [req.user.id] : [];
+
     let sql, params;
 
     if (range === 'day') {
       sql = `SELECT DATE(ts) as date, SUM(total) as total, SUM(profit) as profit, COUNT(id) as count
-             FROM Sale WHERE DATE(ts) = CURDATE() GROUP BY DATE(ts) ORDER BY DATE(ts) ASC`;
-      params = [];
+             FROM Sale WHERE DATE(ts) = CURDATE() ${cashierFilter}
+             GROUP BY DATE(ts) ORDER BY DATE(ts) ASC`;
+      params = [...cashierParam];
     } else {
       const daysFilter = range === 'week' ? 7 : 30;
       sql = `SELECT DATE(ts) as date, SUM(total) as total, SUM(profit) as profit, COUNT(id) as count
-             FROM Sale WHERE ts >= DATE_SUB(CURDATE(), INTERVAL ? DAY) GROUP BY DATE(ts) ORDER BY DATE(ts) ASC`;
-      params = [daysFilter];
+             FROM Sale WHERE ts >= DATE_SUB(CURDATE(), INTERVAL ? DAY) ${cashierFilter}
+             GROUP BY DATE(ts) ORDER BY DATE(ts) ASC`;
+      params = [daysFilter, ...cashierParam];
     }
 
     const [data] = await pool.query(sql, params);
     let overall = { total: 0, profit: 0, count: 0 };
-    data.forEach(d => { overall.total += d.total; overall.profit += d.profit; overall.count += d.count; });
+    data.forEach(d => { overall.total += Number(d.total); overall.profit += Number(d.profit); overall.count += d.count; });
+
     res.json({ history: data, overall });
-  } catch (err) { res.status(500).json({ error: 'حدث خطأ' }); }
+  } catch (err) {
+    console.error('Historical Report Error:', err.message);
+    res.status(500).json({ error: 'حدث خطأ' });
+  }
 });
 
 router.get('/security', verifyToken, authorizeRoles('admin', 'pharmacist'), async (req, res) => {
