@@ -228,7 +228,7 @@ router.post('/analyze-image', verifyToken, authorizeRoles('admin', 'pharmacist')
       },
     };
 
-    const model = genAI.getGenerativeModel({ model: "gemini-3.1-flash-Lite" });
+    const model = genAI.getGenerativeModel({ model: "gemini-3.0-flash" });
 
     // هندسة الأوامر بدقة لتتطابق مع الداتا بيز الخاصة بك
     const prompt = `
