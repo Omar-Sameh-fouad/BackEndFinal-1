@@ -46,9 +46,9 @@ router.get('/notifications', verifyToken, authorizeRoles('admin', 'pharmacist'),
 // =================== تقرير الوردية الحالية (العداد الحالي) ===================
 router.get('/reports/today', verifyToken, authorizeRoles('admin', 'pharmacist', 'cashier'), async (req, res) => {
   try {
-    const isCashier = req.user.role === 'cashier';
-    const cashierFilter = isCashier ? 'AND cashierId = ?' : '';
-    const cashierParams = isCashier ? [req.user.id] : [];
+    const isAdmin = req.user.role === 'admin';
+    const cashierFilter = isAdmin ? '' : 'AND cashierId = ?';
+    const cashierParams = isAdmin ? [] : [req.user.id];
 
     // التعديل: تجميع المبيعات اللي (isClosed = FALSE) عشان العداد يصفر بعد التقفيل
     const [sales] = await pool.query(
@@ -75,9 +75,9 @@ router.get('/reports/today', verifyToken, authorizeRoles('admin', 'pharmacist', 
 router.get('/reports/historical', verifyToken, authorizeRoles('admin', 'pharmacist', 'cashier'), async (req, res) => {
   try {
     const { range } = req.query;
-    const isCashier = req.user.role === 'cashier';
-    const cashierFilter = isCashier ? 'AND cashierId = ?' : '';
-    const cashierParam  = isCashier ? [req.user.id] : [];
+    const isAdmin = req.user.role === 'admin';
+    const cashierFilter = isAdmin ? '' : 'AND cashierId = ?';
+    const cashierParam  = isAdmin ? [] : [req.user.id];
 
     let sql, params;
 
