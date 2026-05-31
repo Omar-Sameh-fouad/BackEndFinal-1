@@ -211,7 +211,7 @@ router.get('/generic-suggestions', verifyToken, authorizeRoles('admin', 'pharmac
   }
 });
 
-// ==========================================
+/*// ==========================================
 // 8. التعرف على الدواء بالذكاء الاصطناعي (AI Endpoint)
 // ==========================================
 router.post('/analyze-image', verifyToken, authorizeRoles('admin', 'pharmacist'), upload.single('medicineImage'), async (req, res) => {
@@ -259,6 +259,88 @@ router.post('/analyze-image', verifyToken, authorizeRoles('admin', 'pharmacist')
     console.error('AI Analysis Error:', err);
     res.status(500).json({ error: 'فشل في تحليل الصورة. تأكد من وضوح الصورة والمحاولة مرة أخرى.' });
   }
-});
+});*/
+
+// ==========================================
+// 8. التعرف على الدواء بالذكاء الاصطناعي (AI Endpoint)
+// ==========================================
+router.post(
+  '/analyze-image',
+  verifyToken,
+  authorizeRoles('admin', 'pharmacist'),
+  upload.array('medicineImages', 5),
+  async (req, res) => {
+    try {
+      if (!req.files || req.files.length === 0) {
+        return res.status(400).json({
+          error: 'الرجاء إرفاق صورة واحدة على الأقل'
+        });
+      }
+
+      // تحويل كل الصور إلى Base64
+      const imageParts = req.files.map(file => ({
+        inlineData: {
+          data: file.buffer.toString('base64'),
+          mimeType: file.mimetype
+        }
+      }));
+
+      const model = genAI.getGenerativeModel({
+        model: 'gemini-2.5-flash'
+      });
+
+      const prompt = `
+        You are an expert pharmacist AI.
+
+        Analyze ALL provided medicine images together as a single medicine package.
+
+        Some images may contain:
+        - Front side
+        - Back side
+        - Barcode
+        - Expiry date
+        - Manufacturer details
+        - Side labels
+
+        Combine information from all images and return ONLY one JSON object.
+
+        Do not include markdown formatting like \`\`\`json.
+
+        Keys to extract:
+        - "name": Medicine name in English or Arabic (string).
+        - "barcode": Any numerical barcode visible on the box (string, default to empty string).
+        - "genericName": The active ingredient / scientific name (string, default to empty string).
+        - "manufacturer": The company that produced it (string, default to empty string).
+        - "medicineForm": The form of medicine in Arabic (e.g., "أقراص", "كبسول", "شراب", "حقن", "مرهم") (string, default to empty string).
+        - "expiryDate": The expiration date formatted EXACTLY as YYYY-MM-DD. If only MM/YY is visible, use the last day of that month (string, default to empty string).
+        - "stripCount": The number of strips inside the box if indicated (number, default to 0).
+        - "pillCount": The total number of pills in the box if indicated (number, default to 0).
+      `;
+
+      const result = await model.generateContent([
+        prompt,
+        ...imageParts
+      ]);
+
+      let responseText = result.response.text();
+
+      responseText = responseText
+        .replace(/```json/g, '')
+        .replace(/```/g, '')
+        .trim();
+
+      const extractedData = JSON.parse(responseText);
+
+      res.json(extractedData);
+
+    } catch (err) {
+      console.error('AI Analysis Error:', err);
+
+      res.status(500).json({
+        error: 'فشل في تحليل الصورة. تأكد من وضوح الصور والمحاولة مرة أخرى.'
+      });
+    }
+  }
+);
 
 module.exports = router;
