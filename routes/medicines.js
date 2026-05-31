@@ -5,8 +5,17 @@ const pool = require('../config/db');
 const { verifyToken, authorizeRoles } = require('../middlewares/verifyToken');
 const { validateRequest, schemas } = require('../middlewares/validator');
 const axios = require('axios');
+const multer = require('multer');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 
+// --- إعدادات مكتبات الذكاء الاصطناعي والرفع لبيئة Railway ---
+const storage = multer.memoryStorage();
+const upload = multer({ storage: storage });
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
+// ==========================================
+// 1. جلب قائمة الأدوية
+// ==========================================
 router.get('/', verifyToken, authorizeRoles('admin', 'pharmacist'), async (req, res) => {
   try {
     const limit  = Math.max(1, parseInt(req.query.limit, 10) || 50);
@@ -40,7 +49,9 @@ router.get('/', verifyToken, authorizeRoles('admin', 'pharmacist'), async (req, 
   }
 });
 
-// البحث بالباركود 
+// ==========================================
+// 2. البحث بالباركود
+// ==========================================
 router.get('/search/:barcode', verifyToken, authorizeRoles('admin', 'pharmacist', 'cashier'), async (req, res) => {
   try {
     const [medicine] = await pool.query('SELECT * FROM Medicine WHERE barcode = ?', [req.params.barcode]);
@@ -52,7 +63,9 @@ router.get('/search/:barcode', verifyToken, authorizeRoles('admin', 'pharmacist'
   } catch (err) { res.status(500).json({ error: 'حدث خطأ في البحث' }); }
 });
 
-// البحث بالاسم
+// ==========================================
+// 3. البحث بالاسم
+// ==========================================
 router.get('/search-by-name', verifyToken, authorizeRoles('admin', 'pharmacist', 'cashier'), async (req, res) => {
   try {
     const { q } = req.query;
@@ -80,7 +93,9 @@ router.get('/search-by-name', verifyToken, authorizeRoles('admin', 'pharmacist',
   }
 });
 
-// إضافة دواء جديد
+// ==========================================
+// 4. إضافة دواء جديد
+// ==========================================
 router.post('/', verifyToken, authorizeRoles('admin', 'pharmacist'), validateRequest(schemas.medicine), async (req, res) => {
   try {
     const {
@@ -106,7 +121,9 @@ router.post('/', verifyToken, authorizeRoles('admin', 'pharmacist'), validateReq
   }
 });
 
-// تعديل دواء موجود)
+// ==========================================
+// 5. تعديل دواء موجود
+// ==========================================
 router.put('/:id', verifyToken, authorizeRoles('admin', 'pharmacist'), async (req, res) => {
   try {
     const {
@@ -155,7 +172,9 @@ router.put('/:id', verifyToken, authorizeRoles('admin', 'pharmacist'), async (re
   }
 });
 
-// مسح دواء
+// ==========================================
+// 6. مسح دواء
+// ==========================================
 router.delete('/:id', verifyToken, authorizeRoles('admin', 'pharmacist'), async (req, res) => {
   try {
     const [result] = await pool.query('DELETE FROM Medicine WHERE id = ?', [req.params.id]);
@@ -167,6 +186,9 @@ router.delete('/:id', verifyToken, authorizeRoles('admin', 'pharmacist'), async 
   }
 });
 
+// ==========================================
+// 7. اقتراحات الأسماء العلمية
+// ==========================================
 router.get('/generic-suggestions', verifyToken, authorizeRoles('admin', 'pharmacist'), async (req, res) => {
   try {
     const { term } = req.query;
@@ -186,6 +208,56 @@ router.get('/generic-suggestions', verifyToken, authorizeRoles('admin', 'pharmac
     }
     console.error('RxNav Search Error:', err.message);
     res.status(500).json({ error: 'فشل في الاتصال بقاعدة البيانات الطبية' });
+  }
+});
+
+// ==========================================
+// 8. التعرف على الدواء بالذكاء الاصطناعي (AI Endpoint)
+// ==========================================
+router.post('/analyze-image', verifyToken, authorizeRoles('admin', 'pharmacist'), upload.single('medicineImage'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'الرجاء إرفاق صورة الدواء' });
+    }
+
+    // قراءة الصورة من الميموري وتحويلها لـ Base64
+    const imageBase64 = {
+      inlineData: {
+        data: req.file.buffer.toString("base64"),
+        mimeType: req.file.mimetype
+      },
+    };
+
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+
+    // هندسة الأوامر بدقة لتتطابق مع الداتا بيز الخاصة بك
+    const prompt = `
+      You are an expert pharmacist AI. Analyze this medicine image and extract the following details strictly as a JSON object.
+      Do not include any markdown formatting like \`\`\`json. Return ONLY the raw JSON.
+
+      Keys to extract:
+      - "name": Medicine name in English or Arabic (string).
+      - "barcode": Any numerical barcode visible on the box (string, default to empty string).
+      - "genericName": The active ingredient / scientific name (string, default to empty string).
+      - "manufacturer": The company that produced it (string, default to empty string).
+      - "medicineForm": The form of medicine in Arabic (e.g., "أقراص", "كبسول", "شراب", "حقن", "مرهم") (string, default to empty string).
+      - "expiryDate": The expiration date formatted EXACTLY as YYYY-MM-DD. If only MM/YY is visible, use the last day of that month (string, default to empty string).
+      - "stripCount": The number of strips inside the box if indicated (number, default to 0).
+      - "pillCount": The total number of pills in the box if indicated (number, default to 0).
+    `;
+
+    const result = await model.generateContent([prompt, imageBase64]);
+    let responseText = result.response.text();
+    
+    // تنظيف النتيجة من أي Markdown
+    responseText = responseText.replace(/```json/g, '').replace(/```/g, '').trim();
+    const extractedData = JSON.parse(responseText);
+
+    res.json(extractedData);
+
+  } catch (err) {
+    console.error('AI Analysis Error:', err);
+    res.status(500).json({ error: 'فشل في تحليل الصورة. تأكد من وضوح الصورة والمحاولة مرة أخرى.' });
   }
 });
 
