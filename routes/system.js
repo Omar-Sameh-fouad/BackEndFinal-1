@@ -140,18 +140,36 @@ router.post('/security/reset-pin', verifyToken, authorizeRoles('admin'), async (
   } catch (err) { res.status(500).json({ error: 'حدث خطأ' }); }
 });
 
+// =================== تقفيل اليوم المعدل ===================
 router.post('/daily-closing', verifyToken, authorizeRoles('admin', 'pharmacist'), async (req, res) => {
   try {
     const { date, totals, grandTotal, salesCount, closedByName, closedById, pin } = req.body;
-    const [sec] = await pool.query('SELECT pinHash FROM ManagerSecurity WHERE id = "1"');
-    if (sec.length === 0) return res.status(401).json({ error: 'إعدادات الأمان غير مكتملة' });
-    const isValid = await bcrypt.compare(pin, sec[0].pinHash);
-    if (!isValid) return res.status(401).json({ error: 'رقم التعريف الشخصي (PIN) غير صحيح' });
+    
+    // جلب رقم الموظف الحالي من الـ Token
+    const userId = req.user.id;
+
+    // جلب الباسوورد الخاص به من جدول User
+    const [userDb] = await pool.query('SELECT password FROM User WHERE id = ?', [userId]);
+    
+    if (userDb.length === 0) {
+      return res.status(401).json({ error: 'المستخدم غير موجود' });
+    }
+
+    // مقارنة كلمة المرور المُدخلة مع كلمة مرور الحساب
+    const isValid = await bcrypt.compare(pin, userDb[0].password);
+    if (!isValid) {
+      return res.status(401).json({ error: 'كلمة المرور غير صحيحة' });
+    }
+
     const sql = `INSERT INTO DailyClosing (id, date, totals, grandTotal, salesCount, closedByName, closedById) VALUES (?, ?, ?, ?, ?, ?, ?)`;
     await pool.query(sql, [uuidv4(), date, JSON.stringify(totals), grandTotal, salesCount, closedByName, closedById]);
     res.json({ message: 'تم تقفيل اليوم بنجاح' });
-  } catch (err) { res.status(500).json({ error: 'حدث خطأ' }); }
+  } catch (err) { 
+    console.error(err);
+    res.status(500).json({ error: 'حدث خطأ أثناء تقفيل اليوم' }); 
+  }
 });
+// ==========================================================
 
 router.post('/logs', verifyToken, authorizeRoles('admin'), async (req, res) => {
   try {
