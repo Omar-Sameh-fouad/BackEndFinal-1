@@ -173,17 +173,22 @@ router.get('/', verifyToken, authorizeRoles('admin', 'pharmacist', 'cashier'), a
     const limit = Math.max(1, parseInt(req.query.limit, 10) || 50);
     const page  = Math.max(1, parseInt(req.query.page,  10) || 1);
     const offset = (page - 1) * limit;
-    const { date } = req.query;
+    
+    // ✅ إضافة استقبال الـ cashierId من الفرونت إند
+    const { date, cashierId } = req.query;
 
     const isRestrictedRole = req.user.role === 'cashier';
 
     const conditions = [];
     const queryParams = [];
 
-    // الكاشير يشوف مبيعاته بس — مش ممكن يتخطى الفلتر ده حتى لو بعت cashierId مختلف
+    // ✅ التعديل هنا: تطبيق الفلتر على أي رتبة لو اتبعت cashierId، أو إجباري للكاشير
     if (isRestrictedRole) {
       conditions.push('cashierId = ?');
       queryParams.push(req.user.id);
+    } else if (cashierId) {
+      conditions.push('cashierId = ?');
+      queryParams.push(cashierId);
     }
 
     if (date) {
