@@ -173,16 +173,17 @@ router.get('/', verifyToken, authorizeRoles('admin', 'pharmacist', 'cashier'), a
     const offset = (page - 1) * limit;
     const { date } = req.query;
 
-    // ✅ الحل الجذري: إجبار الفلترة دايماً بـ ID الموظف اللي مسجل دخول (من التوكن) لأي رتبة
-    const conditions = ['cashierId = ?'];
-    const queryParams = [req.user.id];
+    // الـ admin يشوف كل المبيعات، وباقي الرولز يشوفوا بتاعتهم بس
+    const isAdmin = req.user.role === 'admin';
+    const conditions = isAdmin ? [] : ['cashierId = ?'];
+    const queryParams = isAdmin ? [] : [req.user.id];
 
     if (date) {
       conditions.push('DATE(ts) = ?');
       queryParams.push(date);
     }
 
-    const whereClause = 'WHERE ' + conditions.join(' AND ');
+    const whereClause = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : '';
 
     const countQuery = `SELECT COUNT(*) AS total FROM Sale ${whereClause}`;
     const dataQuery  = `SELECT id, total, cost, profit, paymentMethod, cashierName, ts 
