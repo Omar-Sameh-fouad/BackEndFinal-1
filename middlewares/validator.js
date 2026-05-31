@@ -57,7 +57,7 @@ const schemas = {
     address: Joi.string().optional().allow('', null)
   }),
 
-  sale: Joi.object({
+ /* sale: Joi.object({
     paymentMethod: Joi.string().valid('cash', 'card', 'wallet', 'insurance').required(),
     // ✅ FIX: أضفنا forceInteraction عشان Joi ما يرفضهاش
     forceInteraction: Joi.boolean().optional().default(false),
@@ -79,7 +79,22 @@ const schemas = {
       })
     ).min(1).required()
   })
-};
+};*/
+
+sale: Joi.object({
+  paymentMethod: Joi.string().valid('cash', 'card', 'wallet', 'insurance').required(),
+  forceInteraction: Joi.boolean().optional().default(false),
+  items: Joi.array().items(
+    Joi.object({
+      medicineId: Joi.string().required(),
+      qty: Joi.number().positive().required(),
+      quantityType: Joi.string().valid('box', 'strip', 'pill').required(),
+
+      stripCount: Joi.number().integer().min(0).optional().allow(null),
+      pillCount: Joi.number().integer().min(0).optional().allow(null)
+    })
+  ).min(1).required()
+})
 
 const validateRequest = (schema) => {
   return (req, res, next) => {
