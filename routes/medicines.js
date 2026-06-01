@@ -22,9 +22,9 @@ router.get('/', verifyToken, authorizeRoles('admin', 'pharmacist'), async (req, 
     const page   = Math.max(1, parseInt(req.query.page,  10) || 1);
     const offset = (page - 1) * limit;
 
-    const [[{ total }]] = await pool.query('SELECT COUNT(*) AS total FROM Medicine');
+    const [[{ total }]] = await pool.query('SELECT COUNT(*) AS total FROM Medicine WHERE isActive = 1');
     const [medicines]   = await pool.query(
-      'SELECT * FROM Medicine ORDER BY name ASC LIMIT ? OFFSET ?',
+      'SELECT * FROM Medicine WHERE isActive = 1 ORDER BY name ASC LIMIT ? OFFSET ?',
       [limit, offset]
     );
 
@@ -54,7 +54,7 @@ router.get('/', verifyToken, authorizeRoles('admin', 'pharmacist'), async (req, 
 // ==========================================
 router.get('/search/:barcode', verifyToken, authorizeRoles('admin', 'pharmacist', 'cashier'), async (req, res) => {
   try {
-    const [medicine] = await pool.query('SELECT * FROM Medicine WHERE barcode = ?', [req.params.barcode]);
+    const [medicine] = await pool.query('SELECT * FROM Medicine WHERE barcode = ? AND isActive = 1', [req.params.barcode]);
     if (medicine.length === 0) return res.status(404).json({ error: 'الدواء غير موجود' });
     medicine[0].quantity = parseFloat(medicine[0].quantity);
     medicine[0].sellingPrice = parseFloat(medicine[0].sellingPrice);
@@ -75,7 +75,7 @@ router.get('/search-by-name', verifyToken, authorizeRoles('admin', 'pharmacist',
     const [medicines] = await pool.query(
       `SELECT id, name, genericName, sellingPrice, quantity, stripCount, pillCount
        FROM Medicine 
-       WHERE name LIKE ? OR genericName LIKE ?
+       WHERE (name LIKE ? OR genericName LIKE ?) AND isActive = 1
        ORDER BY name ASC
        LIMIT 15`,
       [searchTerm, searchTerm]
@@ -177,11 +177,28 @@ router.put('/:id', verifyToken, authorizeRoles('admin', 'pharmacist'), async (re
 // ==========================================
 router.delete('/:id', verifyToken, authorizeRoles('admin', 'pharmacist'), async (req, res) => {
   try {
+    // التحقق إذا كان الدواء مرتبط بفواتير مبيعات
+    const [[{ count }]] = await pool.query(
+      'SELECT COUNT(*) as count FROM SaleItem WHERE medicineId = ?',
+      [req.params.id]
+    );
+
+    if (count > 0) {
+      // مرتبط بفواتير — Soft Delete فقط
+      const [result] = await pool.query(
+        'UPDATE Medicine SET isActive = 0 WHERE id = ?',
+        [req.params.id]
+      );
+      if (result.affectedRows === 0) return res.status(404).json({ error: 'الدواء غير موجود' });
+      return res.json({ message: 'تم إيقاف الدواء بنجاح' });
+    }
+
+    // مفيش تاريخ مبيعات — حذف حقيقي
     const [result] = await pool.query('DELETE FROM Medicine WHERE id = ?', [req.params.id]);
     if (result.affectedRows === 0) return res.status(404).json({ error: 'الدواء غير موجود' });
     res.json({ message: 'تم مسح الدواء بنجاح' });
+
   } catch (err) {
-    if (err.code === 'ER_ROW_IS_REFERENCED_2') return res.status(400).json({ error: 'مرتبط بفواتير مبيعات سابقة!' });
     res.status(500).json({ error: 'حدث خطأ' });
   }
 });
