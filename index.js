@@ -68,6 +68,7 @@ app.use(cors({
     'http://localhost:5173',
     'https://final-project-pharma-care.vercel.app',
     'https://frontend-careplus.vercel.app',
+    'https://final-project-pharma-care-bhp6mc8fi.vercel.app',
     process.env.FRONTEND_URL,
   ].filter(Boolean),
   credentials: true,
