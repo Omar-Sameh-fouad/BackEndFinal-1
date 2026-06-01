@@ -8,8 +8,21 @@ const schemas = {
   user: Joi.object({
     username: Joi.string().min(3).required(),
     fullName: Joi.string().required(),
-    email: Joi.string().email().allow('', null),
-    phone: Joi.string().pattern(/^[0-9]+$/),
+    
+    email: Joi.string().email().pattern(/@gmail\.com$/).required().messages({
+      'string.empty': 'الرجاء إدخال البريد الإلكتروني',
+      'string.email': 'صيغة البريد الإلكتروني غير صحيحة',
+      'string.pattern.base': 'البريد الإلكتروني يجب أن يكون @gmail.com فقط',
+      'any.required': 'البريد الإلكتروني مطلوب'
+    }),
+
+    // التعديل هنا: إجباري + 11 رقم بالضبط
+    phone: Joi.string().pattern(/^[0-9]{11}$/).required().messages({
+      'string.empty': 'الرجاء إدخال رقم الهاتف',
+      'string.pattern.base': 'رقم الهاتف يجب أن يتكون من 11 رقم بالضبط',
+      'any.required': 'رقم الهاتف مطلوب'
+    }),
+
     role: Joi.string().valid('admin', 'pharmacist', 'delivery', 'cashier').required(),
     password: Joi.string().pattern(passwordRegex).required().messages({
       'string.pattern.base': passwordMessage,
@@ -22,8 +35,21 @@ const schemas = {
   updateUser: Joi.object({
     username: Joi.string().min(3).required(),
     fullName: Joi.string().required(),
-    email: Joi.string().email().allow('', null),
-    phone: Joi.string().pattern(/^[0-9]+$/),
+    
+    email: Joi.string().email().pattern(/@gmail\.com$/).required().messages({
+      'string.empty': 'الرجاء إدخال البريد الإلكتروني',
+      'string.email': 'صيغة البريد الإلكتروني غير صحيحة',
+      'string.pattern.base': 'البريد الإلكتروني يجب أن يكون @gmail.com فقط',
+      'any.required': 'البريد الإلكتروني مطلوب'
+    }),
+
+    // التعديل هنا أيضاً في حالة التحديث
+    phone: Joi.string().pattern(/^[0-9]{11}$/).required().messages({
+      'string.empty': 'الرجاء إدخال رقم الهاتف',
+      'string.pattern.base': 'رقم الهاتف يجب أن يتكون من 11 رقم بالضبط',
+      'any.required': 'رقم الهاتف مطلوب'
+    }),
+
     role: Joi.string().valid('admin', 'pharmacist', 'delivery', 'cashier').required(),
     password: Joi.string().pattern(passwordRegex).optional().allow('', null).messages({
       'string.pattern.base': passwordMessage
