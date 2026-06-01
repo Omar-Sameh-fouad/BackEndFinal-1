@@ -1,5 +1,9 @@
 const Joi = require('joi');
 
+// التعبير النمطي للشروط: 8 أحرف على الأقل، حرف كبير، حرف صغير، رقم، ورمز خاص
+const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+={}\[\]|\\:;"'<>,.?/-]).{8,}$/;
+const passwordMessage = 'كلمة المرور يجب أن لا تقل عن 8 أحرف، وتحتوي على: حرف كبير، حرف صغير، رقم، ورمز خاص.';
+
 const schemas = {
   user: Joi.object({
     username: Joi.string().min(3).required(),
@@ -7,7 +11,10 @@ const schemas = {
     email: Joi.string().email().allow('', null),
     phone: Joi.string().pattern(/^[0-9]+$/),
     role: Joi.string().valid('admin', 'pharmacist', 'delivery', 'cashier').required(),
-    password: Joi.string().min(6).required(),
+    password: Joi.string().pattern(passwordRegex).required().messages({
+      'string.pattern.base': passwordMessage,
+      'any.required': 'الرجاء إدخال كلمة المرور'
+    }),
     expectedDays: Joi.number().integer().min(1).max(31).optional(),
     dailyHours: Joi.number().integer().min(1).max(24).optional()
   }),
@@ -18,7 +25,9 @@ const schemas = {
     email: Joi.string().email().allow('', null),
     phone: Joi.string().pattern(/^[0-9]+$/),
     role: Joi.string().valid('admin', 'pharmacist', 'delivery', 'cashier').required(),
-    password: Joi.string().min(6).optional().allow('', null),
+    password: Joi.string().pattern(passwordRegex).optional().allow('', null).messages({
+      'string.pattern.base': passwordMessage
+    }),
     expectedDays: Joi.number().integer().min(1).max(31).optional(),
     dailyHours: Joi.number().integer().min(1).max(24).optional(),
     active: Joi.number().valid(0, 1).optional()

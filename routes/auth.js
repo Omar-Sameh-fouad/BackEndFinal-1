@@ -53,23 +53,17 @@ router.post('/forgot-password', async (req, res) => {
     const { email } = req.body;
     if (!email) return res.status(400).json({ error: 'الرجاء إدخال البريد الإلكتروني' });
 
-    // التأكد إن الإيميل موجود ومفعل
     const [users] = await pool.query('SELECT id, fullName FROM User WHERE email = ? AND active = 1', [email]);
     if (users.length === 0) return res.status(404).json({ error: 'البريد الإلكتروني غير مسجل أو الحساب غير مفعل' });
 
-    // توليد كود من 6 أرقام
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    
-    // تحديد وقت انتهاء الصلاحية (15 دقيقة من الآن)
     const expiryDate = new Date(Date.now() + 15 * 60 * 1000);
 
-    // حفظ الكود في الداتا بيز
     await pool.query(
       'UPDATE User SET resetOtp = ?, resetOtpExpiry = ? WHERE email = ?',
       [otp, expiryDate, email]
     );
 
-    // تجهيز الإيميل
     const mailOptions = {
       from: process.env.EMAIL_USER,
       to: email,
@@ -85,7 +79,6 @@ router.post('/forgot-password', async (req, res) => {
       `
     };
 
-    // إرسال الإيميل
     await transporter.sendMail(mailOptions);
 
     res.json({ message: 'تم إرسال رمز الاستعادة إلى بريدك الإلكتروني بنجاح' });
@@ -104,30 +97,27 @@ router.post('/reset-password', async (req, res) => {
       return res.status(400).json({ error: 'الرجاء إدخال البريد الإلكتروني، الرمز، وكلمة المرور الجديدة' });
     }
 
-    if (newPassword.length < 6) {
-      return res.status(400).json({ error: 'كلمة المرور يجب أن تكون 6 أحرف على الأقل' });
+    // تطبيق الـ Regex هنا للتحقق من كلمة المرور الجديدة
+    const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+={}\[\]|\\:;"'<>,.?/-]).{8,}$/;
+    if (!passwordRegex.test(newPassword)) {
+      return res.status(400).json({ error: 'كلمة المرور يجب أن لا تقل عن 8 أحرف، وتحتوي على: حرف كبير، حرف صغير، رقم، ورمز خاص.' });
     }
 
-    // جلب بيانات المستخدم والكود من الداتا بيز
     const [users] = await pool.query('SELECT id, resetOtp, resetOtpExpiry FROM User WHERE email = ?', [email]);
     if (users.length === 0) return res.status(404).json({ error: 'المستخدم غير موجود' });
 
     const user = users[0];
 
-    // التحقق من صحة الكود
     if (!user.resetOtp || user.resetOtp !== otp) {
       return res.status(400).json({ error: 'الرمز الذي أدخلته غير صحيح' });
     }
 
-    // التحقق من وقت الصلاحية
     if (new Date() > new Date(user.resetOtpExpiry)) {
       return res.status(400).json({ error: 'عذراً، هذا الرمز منتهي الصلاحية. يرجى طلب رمز جديد.' });
     }
 
-    // تشفير الباسوورد الجديد
     const hashedPassword = await bcrypt.hash(newPassword, 10);
 
-    // تحديث الباسوورد ومسح الكود القديم
     await pool.query(
       'UPDATE User SET password = ?, resetOtp = NULL, resetOtpExpiry = NULL WHERE email = ?',
       [hashedPassword, email]
@@ -146,7 +136,7 @@ router.post('/create-first-admin', async (req, res) => {
     if (existing.length > 0) {
       return res.status(400).json({ error: 'يوجد أدمن بالفعل، يرجى تسجيل الدخول.' });
     }
-    const hashedPassword = await bcrypt.hash('123456', 10);
+    const hashedPassword = await bcrypt.hash('123456', 10); // احتفظت به كما هو لأول أدمن افتراضي لسهولة الدخول المبدئي
     const sql = `INSERT INTO User (id, username, fullName, email, phone, role, password, active, dailyHours, expectedDays) VALUES (UUID(), 'admin_user', 'المدير العام', 'admin@careplus.com', '01000000000', 'admin', ?, 1, 8, 24)`;
     await pool.query(sql, [hashedPassword]);
     

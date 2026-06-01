@@ -20,11 +20,7 @@ router.post('/', verifyToken, authorizeRoles('admin'), validateRequest(schemas.u
   try {
     const { username, fullName, email, phone, role, password, expectedDays, dailyHours } = req.body;
     
-    // التحقق من أن كلمة المرور 6 رموز بالضبط
-    if (!password || password.length !== 6) {
-       return res.status(400).json({ error: 'كلمة المرور يجب أن تكون 6 أحرف/أرقام بالضبط' });
-    }
-
+    // التشفير المباشر لأن الـ validator قام بالتأكد من الشروط مسبقاً
     const hashedPassword = await bcrypt.hash(password, 10);
 
     const sql = `INSERT INTO User (id, username, fullName, email, phone, role, password, active, dailyHours, expectedDays) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`;
@@ -53,11 +49,8 @@ router.put('/:id', verifyToken, authorizeRoles('admin'), validateRequest(schemas
     const { username, fullName, email, phone, role, password, expectedDays, dailyHours, active } = req.body;
 
     let sql, params;
+    // التحقق إذا تم إرسال كلمة مرور جديدة ليتم تشفيرها وتحديثها
     if (password && password.trim() !== '') {
-      // التحقق من الطول عند تغيير الباسوورد فقط
-      if (password.length !== 6) {
-        return res.status(400).json({ error: 'كلمة المرور يجب أن تكون 6 أحرف او ارقام ' });
-      }
       const hashedPassword = await bcrypt.hash(password, 10);
       sql = `UPDATE User SET username=?, fullName=?, email=?, phone=?, role=?, password=?, dailyHours=?, expectedDays=?, active=? WHERE id=?`;
       params = [username, fullName, email, phone, role, hashedPassword, dailyHours, expectedDays, active, id];
