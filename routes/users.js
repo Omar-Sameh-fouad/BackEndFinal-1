@@ -20,7 +20,6 @@ router.post('/', verifyToken, authorizeRoles('admin'), validateRequest(schemas.u
   try {
     const { username, fullName, email, phone, role, password, expectedDays, dailyHours } = req.body;
     
-    // التشفير المباشر لأن الـ validator قام بالتأكد من الشروط مسبقاً
     const hashedPassword = await bcrypt.hash(password, 10);
 
     const sql = `INSERT INTO User (id, username, fullName, email, phone, role, password, active, dailyHours, expectedDays) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`;
@@ -30,12 +29,15 @@ router.post('/', verifyToken, authorizeRoles('admin'), validateRequest(schemas.u
       dailyHours || 8, expectedDays || 24
     ]);
 
-    res.json({ message: 'تم إضافة المستخدم وتحديد ساعات العمل بنجاح' });
+    res.json({ message: 'تم إضافة المستخدم بنجاح' });
   } catch (err) {
+    // اصطياد الأخطاء لو البيانات متكررة
     if (err.code === 'ER_DUP_ENTRY') {
       const msg = err.sqlMessage.toLowerCase();
       if (msg.includes('username')) return res.status(400).json({ error: 'اسم المستخدم مسجل مسبقاً' });
-      if (msg.includes('phone')) return res.status(400).json({ error: 'رقم الهاتف مسجل مسبقاً' });
+      if (msg.includes('phone')) return res.status(400).json({ error: 'رقم الهاتف مسجل مسبقاً لموظف آخر' });
+      if (msg.includes('email')) return res.status(400).json({ error: 'البريد الإلكتروني مسجل مسبقاً لموظف آخر' });
+      
       return res.status(400).json({ error: 'البيانات مسجلة مسبقاً' });
     }
     console.error(err);
@@ -49,7 +51,6 @@ router.put('/:id', verifyToken, authorizeRoles('admin'), validateRequest(schemas
     const { username, fullName, email, phone, role, password, expectedDays, dailyHours, active } = req.body;
 
     let sql, params;
-    // التحقق إذا تم إرسال كلمة مرور جديدة ليتم تشفيرها وتحديثها
     if (password && password.trim() !== '') {
       const hashedPassword = await bcrypt.hash(password, 10);
       sql = `UPDATE User SET username=?, fullName=?, email=?, phone=?, role=?, password=?, dailyHours=?, expectedDays=?, active=? WHERE id=?`;
@@ -61,8 +62,18 @@ router.put('/:id', verifyToken, authorizeRoles('admin'), validateRequest(schemas
 
     const [result] = await pool.query(sql, params);
     if (result.affectedRows === 0) return res.status(404).json({ error: 'المستخدم غير موجود' });
+    
     res.json({ message: 'تم تحديث بيانات الموظف بنجاح' });
   } catch (err) {
+    // اصطياد الأخطاء في حالة إن الأدمن بيعدل بيانات موظف ودخل رقم أو إيميل متسجلين باسم موظف تاني
+    if (err.code === 'ER_DUP_ENTRY') {
+      const msg = err.sqlMessage.toLowerCase();
+      if (msg.includes('username')) return res.status(400).json({ error: 'اسم المستخدم مسجل مسبقاً' });
+      if (msg.includes('phone')) return res.status(400).json({ error: 'رقم الهاتف مسجل مسبقاً لموظف آخر' });
+      if (msg.includes('email')) return res.status(400).json({ error: 'البريد الإلكتروني مسجل مسبقاً لموظف آخر' });
+      
+      return res.status(400).json({ error: 'البيانات مسجلة مسبقاً' });
+    }
     console.error(err);
     res.status(500).json({ error: 'حدث خطأ أثناء التعديل' });
   }
