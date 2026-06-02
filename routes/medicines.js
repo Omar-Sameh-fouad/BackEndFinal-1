@@ -22,9 +22,9 @@ router.get('/', verifyToken, authorizeRoles('admin', 'pharmacist'), async (req, 
     const page   = Math.max(1, parseInt(req.query.page,  10) || 1);
     const offset = (page - 1) * limit;
 
-    const [[{ total }]] = await pool.query('SELECT COUNT(*) AS total FROM Medicine WHERE isActive = 1');
+    const [[{ total }]] = await pool.query('SELECT COUNT(*) AS total FROM Medicine WHERE isActive = 1 AND quantity > 0');
     const [medicines]   = await pool.query(
-      'SELECT * FROM Medicine WHERE isActive = 1 ORDER BY name ASC LIMIT ? OFFSET ?',
+      'SELECT * FROM Medicine WHERE isActive = 1 AND quantity > 0 ORDER BY name ASC LIMIT ? OFFSET ?',
       [limit, offset]
     );
 
@@ -54,8 +54,8 @@ router.get('/', verifyToken, authorizeRoles('admin', 'pharmacist'), async (req, 
 // ==========================================
 router.get('/search/:barcode', verifyToken, authorizeRoles('admin', 'pharmacist', 'cashier'), async (req, res) => {
   try {
-    const [medicine] = await pool.query('SELECT * FROM Medicine WHERE barcode = ? AND isActive = 1', [req.params.barcode]);
-    if (medicine.length === 0) return res.status(404).json({ error: 'الدواء غير موجود' });
+    const [medicine] = await pool.query('SELECT * FROM Medicine WHERE barcode = ? AND isActive = 1 AND quantity > 0', [req.params.barcode]);
+    if (medicine.length === 0) return res.status(404).json({ error: 'الدواء غير موجود أو نفد من المخزون' });
     medicine[0].quantity = parseFloat(medicine[0].quantity);
     medicine[0].sellingPrice = parseFloat(medicine[0].sellingPrice);
     medicine[0].purchasePrice = parseFloat(medicine[0].purchasePrice);
@@ -75,7 +75,7 @@ router.get('/search-by-name', verifyToken, authorizeRoles('admin', 'pharmacist',
     const [medicines] = await pool.query(
       `SELECT id, name, genericName, sellingPrice, quantity, stripCount, pillCount
        FROM Medicine 
-       WHERE (name LIKE ? OR genericName LIKE ?) AND isActive = 1
+       WHERE (name LIKE ? OR genericName LIKE ?) AND isActive = 1 AND quantity > 0
        ORDER BY name ASC
        LIMIT 15`,
       [searchTerm, searchTerm]
