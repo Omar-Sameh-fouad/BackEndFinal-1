@@ -125,6 +125,23 @@ router.post('/', verifyToken, authorizeRoles('admin', 'pharmacist', 'cashier'), 
 
       await connection.query(`UPDATE Medicine SET quantity = quantity - ? WHERE id = ?`, [deductionQty, item.medicineId]);
 
+      // فحص الكمية بعد الخصم — لو وصلت 0 نسجل في AuditLog عشان يظهر في الـ notifications
+      const [[{ newQty }]] = await connection.query(
+        `SELECT quantity AS newQty FROM Medicine WHERE id = ?`,
+        [item.medicineId]
+      );
+      if (parseFloat(newQty) <= 0) {
+        await connection.query(
+          `INSERT INTO AuditLog (id, actorId, actorName, action, details, severity)
+           VALUES (UUID(), ?, ?, 'OUT_OF_STOCK', ?, 'warning')`,
+          [
+            req.user.id,
+            req.user.username,
+            `نفدت كمية الدواء "${item.name}" من المخزون بعد عملية البيع.`
+          ]
+        );
+      }
+
       await connection.query(
         `INSERT INTO SaleItem (id, qty, unitPrice, unitCost, medicineName, saleId, medicineId, quantityType, stripCount, pillCount) 
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
