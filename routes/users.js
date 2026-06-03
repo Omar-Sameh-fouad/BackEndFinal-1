@@ -8,7 +8,7 @@ const { validateRequest, schemas } = require('../middlewares/validator');
 
 router.get('/', verifyToken, authorizeRoles('admin', 'pharmacist'), async (req, res) => {
   try {
-    const [users] = await pool.query('SELECT id, username, fullName, email, phone, role, expectedDays, dailyHours, active FROM User');
+    const [users] = await pool.query('SELECT id, username, fullName, email, phone, role, expectedDays, dailyHours, active FROM User WHERE active = 1');
     res.json(users);
   } catch (err) {
     console.error(err);
@@ -81,7 +81,7 @@ router.put('/:id', verifyToken, authorizeRoles('admin'), validateRequest(schemas
 
 router.delete('/:id', verifyToken, authorizeRoles('admin'), async (req, res) => {
   try {
-    const [result] = await pool.query('DELETE FROM User WHERE id = ?', [req.params.id]);
+    const [result] = await pool.query('UPDATE User SET active = 0 WHERE id = ?', [req.params.id]);
     if (result.affectedRows === 0) return res.status(404).json({ error: 'المستخدم غير موجود' });
     res.json({ message: 'تم حذف الموظف بنجاح' });
   } catch (err) {
