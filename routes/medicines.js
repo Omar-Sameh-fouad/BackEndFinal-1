@@ -276,7 +276,7 @@ router.post('/analyze-image', verifyToken, authorizeRoles('admin', 'pharmacist')
     console.error('AI Analysis Error:', err);
     res.status(500).json({ error: 'فشل في تحليل الصورة. تأكد من وضوح الصورة والمحاولة مرة أخرى.' });
   }
-});*/
+});
 
 // ==========================================
 // 8. التعرف على الدواء بالذكاء الاصطناعي 
