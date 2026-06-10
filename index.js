@@ -46,12 +46,7 @@ app.use('/api/attendance', attendanceRoutes);
 
 // ================= SERVER =================
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`Secure Server Running with JWT on Port ${PORT}`));*/
-
-
-
-
-
+app.listen(PORT, () => console.log(`Secure Server Running with JWT on Port ${PORT}`));
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
