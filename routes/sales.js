@@ -5,7 +5,7 @@ const { v4: uuidv4 } = require('uuid');
 const { verifyToken, authorizeRoles } = require('../middlewares/verifyToken');
 const { validateRequest, schemas } = require('../middlewares/validator');
 
-// ================= Helper: حساب الكمية الفعلية =================
+// =================  حساب الكمية الفعلية =================
 function calculateFractionalQty(qty, quantityType, stripCount, pillCount) {
   if (quantityType === 'box') return qty;
   if (quantityType === 'strip') return stripCount ? qty / stripCount : qty;
@@ -13,7 +13,7 @@ function calculateFractionalQty(qty, quantityType, stripCount, pillCount) {
   return qty;
 }
 
-// ================= Helper: فحص التعارضات =================
+// ================= فحص التعارضات =================
 async function checkInteractions(items) {
   const genericNames = [...new Set(
     items
@@ -50,7 +50,7 @@ async function checkInteractions(items) {
   return { hasInteraction: interactions.length > 0, details: interactions };
 }
 
-// ================= 1. عملية البيع =================
+// =================  عملية البيع =================
 router.post('/', verifyToken, authorizeRoles('admin', 'pharmacist', 'cashier'), validateRequest(schemas.sale), async (req, res) => {
   const connection = await pool.getConnection();
 
@@ -125,8 +125,7 @@ router.post('/', verifyToken, authorizeRoles('admin', 'pharmacist', 'cashier'), 
 
       await connection.query(`UPDATE Medicine SET quantity = quantity - ? WHERE id = ?`, [deductionQty, item.medicineId]);
 
-      // فحص الكمية بعد الخصم — لو وصلت 0 نسجل في AuditLog عشان يظهر في الـ notifications
-      const [[{ newQty }]] = await connection.query(
+            const [[{ newQty }]] = await connection.query(
         `SELECT quantity AS newQty FROM Medicine WHERE id = ?`,
         [item.medicineId]
       );
@@ -171,21 +170,18 @@ router.post('/', verifyToken, authorizeRoles('admin', 'pharmacist', 'cashier'), 
   }
 });
 
-// ================= 2. جلب سجل المبيعات (دعم الفلترة بفترة أو يوم) =================
 router.get('/', verifyToken, authorizeRoles('admin', 'pharmacist', 'cashier'), async (req, res) => {
   try {
     const limit = Math.max(1, parseInt(req.query.limit, 10) || 50);
     const page  = Math.max(1, parseInt(req.query.page,  10) || 1);
     const offset = (page - 1) * limit;
     
-    // سحب بارامترات الفلترة الجديدة
     const { date, startDate, endDate } = req.query;
 
     const isAdmin = req.user.role === 'admin';
     const conditions = isAdmin ? [] : ['cashierId = ?'];
     const queryParams = isAdmin ? [] : [req.user.id];
 
-    // فلترة التواريخ المحدثة
     if (startDate && endDate) {
       conditions.push('DATE(ts) BETWEEN ? AND ?');
       queryParams.push(startDate, endDate);
@@ -196,7 +192,7 @@ router.get('/', verifyToken, authorizeRoles('admin', 'pharmacist', 'cashier'), a
       conditions.push('DATE(ts) <= ?');
       queryParams.push(endDate);
     } else if (date) {
-      // للحفاظ على توافق الشاشات القديمة (زي شاشة الكاشير)
+  
       conditions.push('DATE(ts) = ?');
       queryParams.push(date);
     }
@@ -221,7 +217,6 @@ router.get('/', verifyToken, authorizeRoles('admin', 'pharmacist', 'cashier'), a
   }
 });
 
-// ================= 3. جلب تفاصيل فاتورة واحدة =================
 router.get('/:id', verifyToken, authorizeRoles('admin', 'pharmacist', 'cashier'), async (req, res) => {
   try {
     const saleId = req.params.id;

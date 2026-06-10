@@ -8,7 +8,7 @@ const nodemailer = require('nodemailer');
 const { JWT_SECRET } = require('../middlewares/verifyToken');
 const { validateRequest, schemas } = require('../middlewares/validator');
 
-// إعداد خدمة إرسال الإيميلات (الإعداد الافتراضي)
+
 const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
@@ -97,7 +97,6 @@ router.post('/reset-password', async (req, res) => {
       return res.status(400).json({ error: 'الرجاء إدخال البريد الإلكتروني، الرمز، وكلمة المرور الجديدة' });
     }
 
-    // تطبيق الـ Regex هنا للتحقق من كلمة المرور الجديدة
     const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+={}\[\]|\\:;"'<>,.?/-]).{8,}$/;
     if (!passwordRegex.test(newPassword)) {
       return res.status(400).json({ error: 'كلمة المرور يجب أن لا تقل عن 8 أحرف، وتحتوي على: حرف كبير، حرف صغير، رقم، ورمز خاص.' });

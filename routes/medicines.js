@@ -177,14 +177,14 @@ router.put('/:id', verifyToken, authorizeRoles('admin', 'pharmacist'), async (re
 // ==========================================
 router.delete('/:id', verifyToken, authorizeRoles('admin', 'pharmacist'), async (req, res) => {
   try {
-    // التحقق إذا كان الدواء مرتبط بفواتير مبيعات
+  
     const [[{ count }]] = await pool.query(
       'SELECT COUNT(*) as count FROM SaleItem WHERE medicineId = ?',
       [req.params.id]
     );
 
     if (count > 0) {
-      // مرتبط بفواتير — Soft Delete فقط
+      
       const [result] = await pool.query(
         'UPDATE Medicine SET isActive = 0 WHERE id = ?',
         [req.params.id]
@@ -193,7 +193,7 @@ router.delete('/:id', verifyToken, authorizeRoles('admin', 'pharmacist'), async 
       return res.json({ message: 'تم إيقاف الدواء بنجاح' });
     }
 
-    // مفيش تاريخ مبيعات — حذف حقيقي
+   
     const [result] = await pool.query('DELETE FROM Medicine WHERE id = ?', [req.params.id]);
     if (result.affectedRows === 0) return res.status(404).json({ error: 'الدواء غير موجود' });
     res.json({ message: 'تم مسح الدواء بنجاح' });
@@ -228,8 +228,8 @@ router.get('/generic-suggestions', verifyToken, authorizeRoles('admin', 'pharmac
   }
 });
 
-/*// ==========================================
-// 8. التعرف على الدواء بالذكاء الاصطناعي (AI Endpoint)
+
+// 8. التعرف على الدواء بالذكاء الاصطناعي 
 // ==========================================
 router.post('/analyze-image', verifyToken, authorizeRoles('admin', 'pharmacist'), upload.single('medicineImage'), async (req, res) => {
   try {
@@ -237,7 +237,7 @@ router.post('/analyze-image', verifyToken, authorizeRoles('admin', 'pharmacist')
       return res.status(400).json({ error: 'الرجاء إرفاق صورة الدواء' });
     }
 
-    // قراءة الصورة من الميموري وتحويلها لـ Base64
+    
     const imageBase64 = {
       inlineData: {
         data: req.file.buffer.toString("base64"),
@@ -247,7 +247,7 @@ router.post('/analyze-image', verifyToken, authorizeRoles('admin', 'pharmacist')
 
     const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
-    // هندسة الأوامر بدقة لتتطابق مع الداتا بيز الخاصة بك
+   
     const prompt = `
       You are an expert pharmacist AI. Analyze this medicine image and extract the following details strictly as a JSON object.
       Do not include any markdown formatting like \`\`\`json. Return ONLY the raw JSON.
@@ -266,7 +266,7 @@ router.post('/analyze-image', verifyToken, authorizeRoles('admin', 'pharmacist')
     const result = await model.generateContent([prompt, imageBase64]);
     let responseText = result.response.text();
     
-    // تنظيف النتيجة من أي Markdown
+   
     responseText = responseText.replace(/```json/g, '').replace(/```/g, '').trim();
     const extractedData = JSON.parse(responseText);
 
@@ -279,7 +279,7 @@ router.post('/analyze-image', verifyToken, authorizeRoles('admin', 'pharmacist')
 });*/
 
 // ==========================================
-// 8. التعرف على الدواء بالذكاء الاصطناعي (AI Endpoint)
+// 8. التعرف على الدواء بالذكاء الاصطناعي 
 // ==========================================
 router.post(
   '/analyze-image',
@@ -294,7 +294,6 @@ router.post(
         });
       }
 
-      // تحويل كل الصور إلى Base64
       const imageParts = req.files.map(file => ({
         inlineData: {
           data: file.buffer.toString('base64'),

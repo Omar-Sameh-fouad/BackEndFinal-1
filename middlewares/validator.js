@@ -1,6 +1,5 @@
 const Joi = require('joi');
 
-// التعبير النمطي للشروط: 8 أحرف على الأقل، حرف كبير، حرف صغير، رقم، ورمز خاص
 const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_+={}\[\]|\\:;"'<>,.?/-]).{8,}$/;
 const passwordMessage = 'كلمة المرور يجب أن لا تقل عن 8 أحرف، وتحتوي على: حرف كبير، حرف صغير، رقم، ورمز خاص.';
 
@@ -86,7 +85,6 @@ const schemas = {
     active: Joi.number().valid(0, 1).optional()
   }),
 
-  // باقي الـ Schemas كما هي بدون تغيير
   medicine: Joi.object({
     name: Joi.string().required(),
     barcode: Joi.string().required(),
@@ -157,7 +155,6 @@ const validateRequest = (schema) => {
     const { error } = schema.validate(req.body);
 
     if (error) {
-      // هنا الـ Backend بيرد بـ 400 (Bad Request) ومعاه رسالة الخطأ المحددة
       return res.status(400).json({
         error: error.details[0].message
       });

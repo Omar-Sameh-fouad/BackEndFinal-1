@@ -52,7 +52,6 @@ router.post('/check-out', verifyToken, authorizeRoles('admin', 'pharmacist', 'ca
       return res.status(400).json({ error: 'الرجاء إرسال الـ username' });
     }
 
-    // 1. جلب بيانات الموظف متضمنة ساعات العمل اليومية (dailyHours)
     const [user] = await pool.query(
       'SELECT id, username, dailyHours FROM User WHERE username = ? AND active = 1',
       [username]
@@ -81,7 +80,6 @@ router.post('/check-out', verifyToken, authorizeRoles('admin', 'pharmacist', 'ca
       return res.status(400).json({ error: 'لم يتم تسجيل حضور هذا الموظف لهذا اليوم بعد' });
     }
 
-    // 3. حساب فرق الوقت والتأكد من استكمال الساعات
     const checkInTime = new Date(checkIn[0].timestamp);
     const currentTime = new Date();
     
@@ -90,12 +88,9 @@ router.post('/check-out', verifyToken, authorizeRoles('admin', 'pharmacist', 'ca
 
     const requiredHours = user[0].dailyHours || 8; // عدد الساعات المطلوبة للموظف (8 ساعات كافتراضي لو القيمة مش موجودة)
 
-    // التحقق إذا كان الموظف لم يكمل ساعاته
     if (workedHours < requiredHours) {
-      // حساب الساعات المتبقية بشكل تقريبي (اختياري لعرضه في رسالة الخطأ)
       const remainingHours = (requiredHours - workedHours).toFixed(2);
       
-      // يمكنك تعديل طريقة عرض الوقت المتبقي ليكون (ساعات ودقائق) لتجربة مستخدم أفضل
       const remainingMinutes = Math.ceil((requiredHours - workedHours) * 60);
       const displayHours = Math.floor(remainingMinutes / 60);
       const displayMins = remainingMinutes % 60;
@@ -109,7 +104,6 @@ router.post('/check-out', verifyToken, authorizeRoles('admin', 'pharmacist', 'ca
       });
     }
 
-    // 4. تسجيل الانصراف في حالة إكمال الساعات
     await pool.query(
       `INSERT INTO Attendance (id, userId, userName, actionType) VALUES (?, ?, ?, 'check-out')`,
       [uuidv4(), user[0].id, user[0].username]

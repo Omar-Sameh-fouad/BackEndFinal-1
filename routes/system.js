@@ -43,14 +43,11 @@ router.get('/notifications', verifyToken, authorizeRoles('admin', 'pharmacist'),
   } catch (err) { res.status(500).json({ error: 'حدث خطأ في الخادم' }); }
 });
 
-// =================== تقرير الوردية الحالية (العداد الحالي) ===================
+// =================== تقرير الوردية الحالية  ===================
 router.get('/reports/today', verifyToken, authorizeRoles('admin', 'pharmacist', 'cashier'), async (req, res) => {
   try {
     const isAdmin = req.user.role === 'admin';
     
-    // اللوجيك الجديد: 
-    // الأدمن بيشوف مبيعات اليوم كله بغض النظر عن التقفيل
-    // الكاشير بيشوف مبيعات ورديته المفتوحة بس عشان تتصفر لما يقفل
     const timeFilter = isAdmin ? 'DATE(ts) = CURDATE()' : 'isClosed = FALSE AND cashierId = ?';
     const queryParams = isAdmin ? [] : [req.user.id];
 
@@ -67,7 +64,6 @@ router.get('/reports/today', verifyToken, authorizeRoles('admin', 'pharmacist', 
     let grandTotal = 0;
     sales.forEach(s => { totals[s.paymentMethod] = Number(s.amount); grandTotal += Number(s.amount); });
 
-    // لو المستخدم أدمن، هنبعتله كمان مين قفل الورديات النهاردة وتفاصيلها
     let closedShifts = [];
     if (isAdmin) {
         const [closings] = await pool.query(
@@ -76,7 +72,6 @@ router.get('/reports/today', verifyToken, authorizeRoles('admin', 'pharmacist', 
         closedShifts = closings;
     }
 
-    // إضافة closedShifts في الاستجابة
     res.json({ totals, grandTotal, salesCount: countData.count, closedShifts });
   } catch (err) {
     console.error('Shift Report Error:', err.message);
@@ -146,8 +141,7 @@ router.post('/security/reset-pin', verifyToken, authorizeRoles('admin'), async (
   } catch (err) { res.status(500).json({ error: 'حدث خطأ' }); }
 });
 
-// =================== تقفيل الوردية (تصفير العداد) ===================
-// تم إضافة 'cashier' للصلاحيات عشان يقدر يقفل ورديته
+// =================== تقفيل الوردية ===================
 router.post('/daily-closing', verifyToken, authorizeRoles('admin', 'pharmacist', 'cashier'), async (req, res) => {
   const connection = await pool.getConnection();
   try {
@@ -163,18 +157,15 @@ router.post('/daily-closing', verifyToken, authorizeRoles('admin', 'pharmacist',
 
     await connection.beginTransaction();
 
-    // 1. تسجيل لقطة الوردية في التقرير
     const sql = `INSERT INTO DailyClosing (id, date, totals, grandTotal, salesCount, closedByName, closedById) VALUES (?, ?, ?, ?, ?, ?, ?)`;
     await connection.query(sql, [uuidv4(), date, JSON.stringify(totals), grandTotal, salesCount, closedByName, closedById]);
     
-    // 2. تصفير العداد: إغلاق كل الفواتير المفتوحة
     const isCashier = req.user.role === 'cashier';
     const cashierFilter = isCashier ? 'AND cashierId = ?' : '';
     const cashierParams = isCashier ? [req.user.id] : [];
     
     await connection.query(`UPDATE Sale SET isClosed = TRUE WHERE isClosed = FALSE ${cashierFilter}`, cashierParams);
 
-    // 3. إضافة إشعار/سجل للأدمن في AuditLog بمعلومات التقفيل
     const logMsg = `قام ${closedByName} بتقفيل الوردية. إجمالي المبيعات: ${grandTotal}، عدد الفواتير: ${salesCount}.`;
     await connection.query(
         `INSERT INTO AuditLog (id, actorId, actorName, action, details, severity) VALUES (?, ?, ?, ?, ?, ?)`,

@@ -31,7 +31,7 @@ router.post('/', verifyToken, authorizeRoles('admin'), validateRequest(schemas.u
 
     res.json({ message: 'تم إضافة المستخدم بنجاح' });
   } catch (err) {
-    // اصطياد الأخطاء لو البيانات متكررة
+   
     if (err.code === 'ER_DUP_ENTRY') {
       const msg = err.sqlMessage.toLowerCase();
       if (msg.includes('username')) return res.status(400).json({ error: 'اسم المستخدم مسجل مسبقاً' });
@@ -65,7 +65,7 @@ router.put('/:id', verifyToken, authorizeRoles('admin'), validateRequest(schemas
     
     res.json({ message: 'تم تحديث بيانات الموظف بنجاح' });
   } catch (err) {
-    // اصطياد الأخطاء في حالة إن الأدمن بيعدل بيانات موظف ودخل رقم أو إيميل متسجلين باسم موظف تاني
+   
     if (err.code === 'ER_DUP_ENTRY') {
       const msg = err.sqlMessage.toLowerCase();
       if (msg.includes('username')) return res.status(400).json({ error: 'اسم المستخدم مسجل مسبقاً' });
