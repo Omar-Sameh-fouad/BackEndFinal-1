@@ -57,12 +57,14 @@ router.post('/', verifyToken, authorizeRoles('admin', 'pharmacist', 'cashier'), 
   try {
     await connection.beginTransaction();
 
-    const { paymentMethod, items, forceInteraction } = req.body;
+    // ✅ استقبال forcePrescription من الـ body
+    const { paymentMethod, items, forceInteraction, forcePrescription } = req.body;
 
     const medicineIds = items.map(item => item.medicineId);
     const placeholders = medicineIds.map(() => '?').join(',');
     const [medicines] = await connection.query(
-      `SELECT id, name, genericName, sellingPrice, purchasePrice, quantity, stripCount, pillCount 
+      // ✅ إضافة requiresPrescription للـ query
+      `SELECT id, name, genericName, sellingPrice, purchasePrice, quantity, stripCount, pillCount, requiresPrescription 
        FROM Medicine WHERE id IN (${placeholders})`,
       medicineIds
     );
@@ -72,6 +74,34 @@ router.post('/', verifyToken, authorizeRoles('admin', 'pharmacist', 'cashier'), 
       if (!medicine) throw new Error(`الدواء غير موجود: ${item.medicineId}`);
       return { ...item, ...medicine };
     });
+
+    // ✅ فحص الأدوية المحتاجة لروشتة
+    const prescriptionMedicines = itemsWithDetails.filter(item => item.requiresPrescription);
+
+    if (prescriptionMedicines.length > 0 && !forcePrescription) {
+      await connection.rollback();
+      return res.status(409).json({
+        error: 'بعض الأدوية تستلزم وصفة طبية',
+        prescriptionRequired: true,
+        medicines: prescriptionMedicines.map(m => ({ id: m.medicineId, name: m.name })),
+        requiresConfirmation: true,
+        message: 'الأدوية التالية تحتاج روشتة طبية. هل تريد الاستمرار في البيع؟'
+      });
+    }
+
+    // ✅ تسجيل في AuditLog لو تم البيع بالقوة رغم الروشتة
+    if (prescriptionMedicines.length > 0 && forcePrescription) {
+      const medicineNames = prescriptionMedicines.map(m => m.name).join(', ');
+      await connection.query(
+        `INSERT INTO AuditLog (id, actorId, actorName, action, details, severity) 
+         VALUES (UUID(), ?, ?, 'SALE_WITHOUT_PRESCRIPTION', ?, 'warning')`,
+        [
+          req.user.id,
+          req.user.username,
+          `تم بيع أدوية تستلزم وصفة طبية بدون روشتة: ${medicineNames}`
+        ]
+      );
+    }
 
     const interactions = await checkInteractions(itemsWithDetails);
 
@@ -125,7 +155,7 @@ router.post('/', verifyToken, authorizeRoles('admin', 'pharmacist', 'cashier'), 
 
       await connection.query(`UPDATE Medicine SET quantity = quantity - ? WHERE id = ?`, [deductionQty, item.medicineId]);
 
-            const [[{ newQty }]] = await connection.query(
+      const [[{ newQty }]] = await connection.query(
         `SELECT quantity AS newQty FROM Medicine WHERE id = ?`,
         [item.medicineId]
       );
@@ -158,7 +188,9 @@ router.post('/', verifyToken, authorizeRoles('admin', 'pharmacist', 'cashier'), 
       message: 'تم البيع بنجاح',
       saleId,
       total: grandTotal,
-      interactionsWarning: interactions.hasInteraction ? 'تم البيع رغم وجود تعارضات' : null
+      interactionsWarning: interactions.hasInteraction ? 'تم البيع رغم وجود تعارضات' : null,
+      // ✅ تحذير في الـ response لو تم البيع بدون روشتة
+      prescriptionWarning: prescriptionMedicines.length > 0 ? 'تم البيع رغم وجود أدوية تستلزم روشتة طبية' : null
     });
 
   } catch (err) {
@@ -192,7 +224,6 @@ router.get('/', verifyToken, authorizeRoles('admin', 'pharmacist', 'cashier'), a
       conditions.push('DATE(ts) <= ?');
       queryParams.push(endDate);
     } else if (date) {
-  
       conditions.push('DATE(ts) = ?');
       queryParams.push(date);
     }
@@ -228,9 +259,22 @@ router.get('/:id', verifyToken, authorizeRoles('admin', 'pharmacist', 'cashier')
 
     const [items] = await pool.query('SELECT * FROM SaleItem WHERE saleId = ?', [saleId]);
 
+    const cleanedItems = items.map(item => ({
+      ...item,
+      qty: parseFloat(item.qty),
+      unitPrice: parseFloat(item.unitPrice),
+      unitCost: parseFloat(item.unitCost),
+      returnedQty: item.returnedQty != null ? parseFloat(item.returnedQty) : null,
+      stripCount: item.stripCount != null ? parseFloat(item.stripCount) : null,
+      pillCount: item.pillCount != null ? parseFloat(item.pillCount) : null,
+    }));
+
     res.json({
       ...sale[0],
-      items
+      total: parseFloat(sale[0].total),
+      cost: parseFloat(sale[0].cost),
+      profit: parseFloat(sale[0].profit),
+      items: cleanedItems
     });
   } catch (err) {
     console.error("Invoice Error:", err.message);

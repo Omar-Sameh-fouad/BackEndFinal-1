@@ -229,63 +229,14 @@ router.get('/generic-suggestions', verifyToken, authorizeRoles('admin', 'pharmac
 });
 
 
-// 8. التعرف على الدواء بالذكاء الاصطناعي 
 // ==========================================
-router.post('/analyze-image', verifyToken, authorizeRoles('admin', 'pharmacist'), upload.single('medicineImage'), async (req, res) => {
-  try {
-    if (!req.file) {
-      return res.status(400).json({ error: 'الرجاء إرفاق صورة الدواء' });
-    }
-
-    
-    const imageBase64 = {
-      inlineData: {
-        data: req.file.buffer.toString("base64"),
-        mimeType: req.file.mimetype
-      },
-    };
-
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
-
-   
-    const prompt = `
-      You are an expert pharmacist AI. Analyze this medicine image and extract the following details strictly as a JSON object.
-      Do not include any markdown formatting like \`\`\`json. Return ONLY the raw JSON.
-
-      Keys to extract:
-      - "name": Medicine name in English or Arabic (string).
-      - "barcode": Any numerical barcode visible on the box (string, default to empty string).
-      - "genericName": The active ingredient / scientific name (string, default to empty string).
-      - "manufacturer": The company that produced it (string, default to empty string).
-      - "medicineForm": The form of medicine in Arabic (e.g., "أقراص", "كبسول", "شراب", "حقن", "مرهم") (string, default to empty string).
-      - "expiryDate": The expiration date formatted EXACTLY as YYYY-MM-DD. If only MM/YY is visible, use the last day of that month (string, default to empty string).
-      - "stripCount": The number of strips inside the box if indicated (number, default to 0).
-      - "pillCount": The total number of pills in the box if indicated (number, default to 0).
-    `;
-
-    const result = await model.generateContent([prompt, imageBase64]);
-    let responseText = result.response.text();
-    
-   
-    responseText = responseText.replace(/```json/g, '').replace(/```/g, '').trim();
-    const extractedData = JSON.parse(responseText);
-
-    res.json(extractedData);
-
-  } catch (err) {
-    console.error('AI Analysis Error:', err);
-    res.status(500).json({ error: 'فشل في تحليل الصورة. تأكد من وضوح الصورة والمحاولة مرة أخرى.' });
-  }
-});
-
-// ==========================================
-// 8. التعرف على الدواء بالذكاء الاصطناعي 
+// 8. التعرف على الدواء بالذكاء الاصطناعي (حتى 5 صور)
 // ==========================================
 router.post(
   '/analyze-image',
   verifyToken,
   authorizeRoles('admin', 'pharmacist'),
-  upload.array('medicineImages', 5),
+  upload.array('medicineImages', 6),
   async (req, res) => {
     try {
       if (!req.files || req.files.length === 0) {
